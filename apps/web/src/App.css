@@ -425,6 +425,70 @@ button {
   line-height: 1.5;
 }
 
+.message-attachments {
+  display: grid;
+  gap: 8px;
+  max-width: 520px;
+  margin-top: 10px;
+}
+
+.message-attachment,
+.pending-attachment {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  border: 1px solid #3a3a3a;
+  border-radius: 8px;
+  background: #202020;
+}
+
+.message-attachment {
+  padding: 8px;
+}
+
+.pending-attachment {
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 8px 10px;
+  background: #1f2624;
+}
+
+.attachment-preview {
+  width: 72px;
+  height: 54px;
+  object-fit: cover;
+  border-radius: 6px;
+  background: #161616;
+}
+
+.attachment-summary {
+  min-width: 0;
+}
+
+.attachment-summary strong {
+  display: block;
+  overflow: hidden;
+  color: #ffffff;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachment-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin-top: 3px;
+  color: #9ea49b;
+  font-size: 12px;
+}
+
+.attachment-meta span + span::before {
+  content: "· ";
+  margin-right: 4px;
+}
+
 .message-actions {
   display: flex;
   gap: 8px;
@@ -472,11 +536,54 @@ button {
 
 .composer {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 10px;
   padding: 14px 20px 18px;
   border-top: 1px solid #333333;
   background: #252525;
+}
+
+.pending-attachments {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 8px;
+}
+
+.pending-attachment button {
+  min-width: 72px;
+  min-height: 32px;
+  padding: 0 10px;
+  background: #2f3936;
+  color: #cfe9dc;
+}
+
+.attach-button {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border: 1px solid #393939;
+  border-radius: 6px;
+  color: #86e0bb;
+  background: #1f2624;
+  font-size: 24px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.attach-button input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+}
+
+.attach-button:has(input:disabled) {
+  cursor: not-allowed;
+  color: #6d746b;
+  background: #1d1d1d;
 }
 
 .composer textarea {

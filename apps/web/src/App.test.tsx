@@ -57,6 +57,40 @@ describe('OpenCord web chat UI', () => {
     expect(timeline).not.toHaveTextContent('Shipping the polished chat UI')
   })
 
+  it('attaches a local file preview to a sent message', async () => {
+    render(<App />)
+
+    const file = new File(['image-bytes'], 'diagram.png', { type: 'image/png' })
+
+    await userEvent.upload(screen.getByLabelText('Attach file'), file)
+    expect(screen.getByText('diagram.png')).toBeInTheDocument()
+    expect(screen.getByLabelText('Pending attachments')).toHaveTextContent('11 B')
+
+    await userEvent.type(screen.getByLabelText('Message composer'), 'See attached diagram')
+    await userEvent.click(screen.getByRole('button', { name: 'Send message' }))
+
+    const timeline = screen.getByLabelText('Message timeline')
+    const sentMessage = within(timeline).getByText('See attached diagram').closest('article')
+    expect(sentMessage).not.toBeNull()
+    expect(within(sentMessage!).getByText('diagram.png')).toBeInTheDocument()
+    expect(within(sentMessage!).getByText('image/png')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Pending attachments')).not.toBeInTheDocument()
+  })
+
+  it('removes a pending attachment before sending', async () => {
+    render(<App />)
+
+    await userEvent.upload(
+      screen.getByLabelText('Attach file'),
+      new File(['notes'], 'notes.txt', { type: 'text/plain' }),
+    )
+    expect(screen.getByText('notes.txt')).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Remove notes.txt' }))
+
+    expect(screen.queryByText('notes.txt')).not.toBeInTheDocument()
+  })
+
   it('creates and selects a new text channel', async () => {
     render(<App />)
 

@@ -35,7 +35,16 @@ type ChatMessage = {
   time: string
   body: string
   own: boolean
+  attachments: MessageAttachment[]
   edited?: boolean
+}
+
+type MessageAttachment = {
+  id: string
+  fileName: string
+  contentType: string
+  sizeBytes: number
+  previewUrl?: string
 }
 
 type Member = {
@@ -105,6 +114,7 @@ const initialMessages: ChatMessage[] = [
     time: '09:14',
     body: 'Welcome to OpenCord. The first chat core is coming together: auth, spaces, channels, messages, permissions, and realtime.',
     own: false,
+    attachments: [],
   },
   {
     id: 'm2',
@@ -114,6 +124,7 @@ const initialMessages: ChatMessage[] = [
     time: '09:22',
     body: 'The web client should feel familiar for Discord users but calmer for company work.',
     own: false,
+    attachments: [],
   },
   {
     id: 'm3',
@@ -123,6 +134,7 @@ const initialMessages: ChatMessage[] = [
     time: '09:31',
     body: 'I am wiring the Phase 01 shell so the backend work has a usable surface.',
     own: true,
+    attachments: [],
   },
   {
     id: 'm4',
@@ -132,6 +144,7 @@ const initialMessages: ChatMessage[] = [
     time: '08:00',
     body: 'Channel permissions are enabled. Members can view announcements but cannot send messages here.',
     own: false,
+    attachments: [],
   },
 ]
 
@@ -173,6 +186,7 @@ export default function App() {
   const [selectedSpaceId, setSelectedSpaceId] = useState(initialSpaces[0].id)
   const [selectedChannelId, setSelectedChannelId] = useState(initialChannels[0].id)
   const [composerText, setComposerText] = useState('')
+  const [pendingAttachments, setPendingAttachments] = useState<MessageAttachment[]>([])
   const [showChannelForm, setShowChannelForm] = useState(false)
   const [newChannelName, setNewChannelName] = useState('')
   const [editingMessage, setEditingMessage] = useState<{ id: string; body: string } | null>(null)
@@ -210,6 +224,7 @@ export default function App() {
     const firstChannel = channels.find((channel) => channel.spaceId === spaceId)
     if (firstChannel) {
       setSelectedChannelId(firstChannel.id)
+      setPendingAttachments([])
     }
   }
 
@@ -240,7 +255,7 @@ export default function App() {
   function sendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const body = composerText.trim()
-    if (!body || !selectedChannel.canSend) {
+    if ((!body && pendingAttachments.length === 0) || !selectedChannel.canSend) {
       return
     }
 
@@ -254,9 +269,32 @@ export default function App() {
         time: 'now',
         body,
         own: true,
+        attachments: pendingAttachments,
       },
     ])
     setComposerText('')
+    setPendingAttachments([])
+  }
+
+  function attachFiles(files: FileList | null) {
+    if (!files || !selectedChannel.canSend) {
+      return
+    }
+
+    const attachments = Array.from(files).map((file) => ({
+      id: `local-attachment-${Date.now()}-${file.name}`,
+      fileName: file.name,
+      contentType: file.type || 'application/octet-stream',
+      sizeBytes: file.size,
+      previewUrl: imagePreviewUrl(file),
+    }))
+    setPendingAttachments((current) => [...current, ...attachments].slice(0, 10))
+  }
+
+  function removePendingAttachment(attachmentId: string) {
+    setPendingAttachments((current) =>
+      current.filter((attachment) => attachment.id !== attachmentId),
+    )
   }
 
   function saveEdit(event: FormEvent<HTMLFormElement>) {
@@ -425,6 +463,7 @@ export default function App() {
                     {message.edited ? <em>edited</em> : null}
                   </header>
                   <p>{message.body}</p>
+                  <AttachmentList attachments={message.attachments} />
                   {message.own ? (
                     <div className="message-actions">
                       <button
@@ -477,6 +516,35 @@ export default function App() {
         ) : null}
 
         <form className="composer" onSubmit={sendMessage}>
+          {pendingAttachments.length > 0 ? (
+            <div className="pending-attachments" aria-label="Pending attachments">
+              {pendingAttachments.map((attachment) => (
+                <div key={attachment.id} className="pending-attachment">
+                  <AttachmentSummary attachment={attachment} />
+                  <button
+                    type="button"
+                    aria-label={`Remove ${attachment.fileName}`}
+                    onClick={() => removePendingAttachment(attachment.id)}
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : null}
+          <label className="attach-button" title="Attach file">
+            <span aria-hidden="true">+</span>
+            <input
+              aria-label="Attach file"
+              type="file"
+              multiple
+              disabled={!selectedChannel.canSend}
+              onChange={(event) => {
+                attachFiles(event.currentTarget.files)
+                event.currentTarget.value = ''
+              }}
+            />
+          </label>
           <textarea
             aria-label="Message composer"
             placeholder={`Message #${selectedChannel.name}`}
@@ -484,7 +552,13 @@ export default function App() {
             disabled={!selectedChannel.canSend}
             onChange={(event) => setComposerText(event.target.value)}
           />
-          <button type="submit" disabled={!selectedChannel.canSend || !composerText.trim()}>
+          <button
+            type="submit"
+            disabled={
+              !selectedChannel.canSend ||
+              (!composerText.trim() && pendingAttachments.length === 0)
+            }
+          >
             Send message
           </button>
         </form>
@@ -533,6 +607,37 @@ function StatusBadge({ health }: { health: HealthState }) {
   )
 }
 
+function AttachmentList({ attachments }: { attachments: MessageAttachment[] }) {
+  if (attachments.length === 0) {
+    return null
+  }
+
+  return (
+    <div className="message-attachments">
+      {attachments.map((attachment) => (
+        <div key={attachment.id} className="message-attachment">
+          {attachment.previewUrl ? (
+            <img src={attachment.previewUrl} alt="" className="attachment-preview" />
+          ) : null}
+          <AttachmentSummary attachment={attachment} />
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function AttachmentSummary({ attachment }: { attachment: MessageAttachment }) {
+  return (
+    <div className="attachment-summary">
+      <strong>{attachment.fileName}</strong>
+      <span className="attachment-meta">
+        <span>{attachment.contentType}</span>
+        <span>{formatBytes(attachment.sizeBytes)}</span>
+      </span>
+    </div>
+  )
+}
+
 function groupChannels(channels: Channel[]) {
   return Array.from(
     channels.reduce((groups, channel) => {
@@ -549,6 +654,28 @@ function groupMembersByRole(memberList: Member[]) {
       return groups
     }, new Map<string, Member[]>()),
   )
+}
+
+function imagePreviewUrl(file: File) {
+  if (!file.type.startsWith('image/') || typeof URL.createObjectURL !== 'function') {
+    return undefined
+  }
+
+  return URL.createObjectURL(file)
+}
+
+function formatBytes(sizeBytes: number) {
+  if (sizeBytes < 1024) {
+    return `${sizeBytes} B`
+  }
+
+  const kib = sizeBytes / 1024
+  if (kib < 1024) {
+    return `${kib.toFixed(kib >= 10 ? 0 : 1)} KiB`
+  }
+
+  const mib = kib / 1024
+  return `${mib.toFixed(mib >= 10 ? 0 : 1)} MiB`
 }
 
 function normalizeChannelName(name: string) {

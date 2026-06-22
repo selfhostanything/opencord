@@ -1,10 +1,10 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import App from './App'
 
-describe('OpenCord web shell', () => {
+describe('OpenCord web chat UI', () => {
   const fetchMock = vi.fn()
 
   beforeEach(() => {
@@ -19,33 +19,66 @@ describe('OpenCord web shell', () => {
     vi.unstubAllGlobals()
   })
 
-  it('renders the server selector and reports API health', async () => {
+  it('renders a Discord-like workspace with rail, channels, messages, composer, and members', async () => {
     render(<App />)
 
-    expect(screen.getByRole('heading', { name: 'OpenCord' })).toBeInTheDocument()
-    expect(screen.getByLabelText('Server URL')).toHaveValue('http://localhost:8080')
+    expect(screen.getByLabelText('Space rail')).toBeInTheDocument()
+    expect(screen.getByRole('navigation', { name: 'Channel navigation' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '# general' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Message timeline')).toHaveTextContent('Welcome to OpenCord')
+    expect(screen.getByLabelText('Message composer')).toBeInTheDocument()
+    expect(screen.getByRole('complementary', { name: 'Members' })).toHaveTextContent('Product')
 
     await waitFor(() => {
       expect(screen.getByText('API online')).toBeInTheDocument()
     })
-
-    expect(screen.getByText('test-version')).toBeInTheDocument()
-    expect(fetchMock).toHaveBeenCalledWith('http://localhost:8080/healthz', {
-      headers: { Accept: 'application/json' },
-    })
   })
 
-  it('checks another compatible server when the URL changes', async () => {
+  it('sends, edits, and deletes a local message in the selected channel', async () => {
     render(<App />)
 
-    await userEvent.clear(screen.getByLabelText('Server URL'))
-    await userEvent.type(screen.getByLabelText('Server URL'), 'https://chat.example.com/')
-    await userEvent.click(screen.getByRole('button', { name: 'Check server' }))
+    await userEvent.type(screen.getByLabelText('Message composer'), 'Shipping the chat UI')
+    await userEvent.click(screen.getByRole('button', { name: 'Send message' }))
 
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenLastCalledWith('https://chat.example.com/healthz', {
-        headers: { Accept: 'application/json' },
-      })
-    })
+    const timeline = screen.getByLabelText('Message timeline')
+    expect(timeline).toHaveTextContent('Shipping the chat UI')
+
+    const sentMessage = within(timeline).getByText('Shipping the chat UI').closest('article')
+    expect(sentMessage).not.toBeNull()
+
+    await userEvent.click(within(sentMessage!).getByRole('button', { name: 'Edit message' }))
+    await userEvent.clear(screen.getByLabelText('Edit message text'))
+    await userEvent.type(screen.getByLabelText('Edit message text'), 'Shipping the polished chat UI')
+    await userEvent.click(screen.getByRole('button', { name: 'Save edit' }))
+
+    expect(timeline).toHaveTextContent('Shipping the polished chat UI')
+
+    await userEvent.click(within(sentMessage!).getByRole('button', { name: 'Delete message' }))
+    expect(timeline).not.toHaveTextContent('Shipping the polished chat UI')
+  })
+
+  it('creates and selects a new text channel', async () => {
+    render(<App />)
+
+    await userEvent.click(screen.getByRole('button', { name: 'Create channel' }))
+    await userEvent.type(screen.getByLabelText('New channel name'), 'launch-room')
+    await userEvent.click(screen.getByRole('button', { name: 'Add channel' }))
+
+    await userEvent.click(screen.getByRole('button', { name: '# launch-room' }))
+
+    expect(screen.getByRole('heading', { name: '# launch-room' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Message timeline')).toHaveTextContent(
+      'No messages yet. Start the channel.',
+    )
+  })
+
+  it('shows a permission denial state for read-only channels', async () => {
+    render(<App />)
+
+    await userEvent.click(screen.getByRole('button', { name: '# announcements' }))
+
+    expect(screen.getByText('You can view this channel but cannot send messages.')).toBeInTheDocument()
+    expect(screen.getByLabelText('Message composer')).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled()
   })
 })

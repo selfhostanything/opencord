@@ -7,10 +7,12 @@ React Native/Expo mobile shell for OpenCord.
 - Login screen for selecting any compatible OpenCord server URL.
 - Channel list screen.
 - Chat screen with local message send state.
+- Multi-server add/switch/remove state shared with web and desktop.
 - Realtime `message.created` envelope reducer for received messages and unread channel state.
 - Push token registration request helper and masked registration state.
 - Shared `@opencord/api-client` default server URL normalization.
 - Shared `@opencord/realtime` status type foundation.
+- Shared `@opencord/server-connections` connection state foundation.
 
 ## Development
 

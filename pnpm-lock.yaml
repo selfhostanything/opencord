@@ -31,6 +31,9 @@ importers:
       '@opencord/realtime':
         specifier: workspace:*
         version: link:../../packages/realtime
+      '@opencord/server-connections':
+        specifier: workspace:*
+        version: link:../../packages/server-connections
       expo:
         specifier: ^56.0.12
         version: 56.0.12(@babel/core@7.29.7)(@expo/dom-webview@56.0.5)(react-dom@19.2.7(react@19.2.7))(react-native@0.86.0(@babel/core@7.29.7)(@types/react@19.2.17)(react@19.2.7))(react@19.2.7)(typescript@6.0.3)
@@ -107,6 +110,15 @@ importers:
         version: 4.1.9(@types/node@25.9.4)(jsdom@29.1.1)(vite@8.0.16(@types/node@25.9.4)(terser@5.48.0)(yaml@2.9.0))
 
   packages/realtime:
+    devDependencies:
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: ^4.1.9
+        version: 4.1.9(@types/node@25.9.4)(jsdom@29.1.1)(vite@8.0.16(@types/node@25.9.4)(terser@5.48.0)(yaml@2.9.0))
+
+  packages/server-connections:
     devDependencies:
       typescript:
         specifier: ~6.0.3

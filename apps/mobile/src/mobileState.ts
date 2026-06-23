@@ -10,6 +10,14 @@ import {
   type RealtimeConnectionStatus,
   type RealtimeIncomingEnvelope,
 } from '@opencord/realtime'
+import {
+  activeServerConnection,
+  createDefaultServerConnectionState,
+  removeServerConnection,
+  switchServerConnection,
+  upsertServerConnection,
+  type ServerConnectionState,
+} from '@opencord/server-connections'
 
 export type MobileScreen = 'login' | 'channels' | 'chat'
 
@@ -47,6 +55,7 @@ export type MobilePushRegistration =
 export type MobileAppState = {
   screen: MobileScreen
   serverUrl: string
+  serverConnections: ServerConnectionState
   account: MobileAccount | null
   channels: MobileChannel[]
   selectedChannelId: string
@@ -64,6 +73,16 @@ export type MobileAction =
   | { type: 'realtime.message_created'; envelope: RealtimeIncomingEnvelope }
   | { type: 'push.registered'; pushToken: PushToken }
   | { type: 'push.failed'; message: string }
+  | {
+      type: 'server.add'
+      baseUrl: string
+      displayName?: string
+      serverVersion?: string
+      capabilities?: string[]
+      now?: string
+    }
+  | { type: 'server.switch'; connectionId: string }
+  | { type: 'server.remove'; connectionId: string }
 
 const initialChannels: MobileChannel[] = [
   {
@@ -106,9 +125,13 @@ const initialMessages: MobileMessage[] = [
 ]
 
 export function createInitialMobileState(): MobileAppState {
+  const serverConnections = createDefaultServerConnectionState()
+  const activeConnection = activeServerConnection(serverConnections)
+
   return {
     screen: 'login',
-    serverUrl: DEFAULT_OPENCORD_SERVER_URL,
+    serverUrl: activeConnection?.baseUrl ?? DEFAULT_OPENCORD_SERVER_URL,
+    serverConnections,
     account: null,
     channels: initialChannels,
     selectedChannelId: initialChannels[0].id,
@@ -125,11 +148,16 @@ export function mobileReducer(state: MobileAppState, action: MobileAction): Mobi
       if (!email) {
         return state
       }
+      const serverConnections = upsertServerConnection(state.serverConnections, {
+        baseUrl: action.serverUrl,
+      })
+      const activeConnection = activeServerConnection(serverConnections)
 
       return {
         ...state,
         screen: 'channels',
-        serverUrl: normalizeOpenCordBaseUrl(action.serverUrl),
+        serverUrl: activeConnection?.baseUrl ?? normalizeOpenCordBaseUrl(action.serverUrl),
+        serverConnections,
         account: {
           email,
           displayName: displayNameForEmail(email),
@@ -212,6 +240,48 @@ export function mobileReducer(state: MobileAppState, action: MobileAction): Mobi
           message: action.message,
         },
       }
+    case 'server.add': {
+      const serverConnections = upsertServerConnection(state.serverConnections, {
+        baseUrl: action.baseUrl,
+        displayName: action.displayName,
+        serverVersion: action.serverVersion,
+        capabilities: action.capabilities,
+        now: action.now,
+      })
+      const activeConnection = activeServerConnection(serverConnections)
+
+      return {
+        ...state,
+        serverUrl: activeConnection?.baseUrl ?? state.serverUrl,
+        serverConnections,
+      }
+    }
+    case 'server.switch': {
+      const serverConnections = switchServerConnection(
+        state.serverConnections,
+        action.connectionId,
+      )
+      const activeConnection = activeServerConnection(serverConnections)
+
+      return {
+        ...state,
+        serverUrl: activeConnection?.baseUrl ?? state.serverUrl,
+        serverConnections,
+      }
+    }
+    case 'server.remove': {
+      const serverConnections = removeServerConnection(
+        state.serverConnections,
+        action.connectionId,
+      )
+      const activeConnection = activeServerConnection(serverConnections)
+
+      return {
+        ...state,
+        serverUrl: activeConnection?.baseUrl ?? DEFAULT_OPENCORD_SERVER_URL,
+        serverConnections,
+      }
+    }
   }
 }
 
@@ -235,6 +305,10 @@ export function selectedChannel(state: MobileAppState) {
   return (
     state.channels.find((channel) => channel.id === state.selectedChannelId) ?? state.channels[0]
   )
+}
+
+export function activeMobileServerConnection(state: MobileAppState) {
+  return activeServerConnection(state.serverConnections)
 }
 
 function displayNameForEmail(email: string) {

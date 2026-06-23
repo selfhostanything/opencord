@@ -16,6 +16,7 @@ describe('OpenCord web chat UI', () => {
   })
 
   afterEach(() => {
+    window.localStorage?.clear?.()
     vi.unstubAllGlobals()
   })
 
@@ -121,5 +122,40 @@ describe('OpenCord web chat UI', () => {
     expect(screen.getByText('You can view this channel but cannot send messages.')).toBeInTheDocument()
     expect(screen.getByLabelText('Message composer')).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled()
+  })
+
+  it('adds, switches, removes, and persists multiple server connections', async () => {
+    render(<App />)
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Switch to Local OpenCord' })).toBeInTheDocument()
+    })
+
+    await userEvent.clear(screen.getByLabelText('Server display name'))
+    await userEvent.type(screen.getByLabelText('Server display name'), 'Company Chat')
+    await userEvent.clear(screen.getByLabelText('Server URL'))
+    await userEvent.type(screen.getByLabelText('Server URL'), 'https://chat.company.com')
+    await userEvent.click(screen.getByRole('button', { name: 'Add server' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Switch to Company Chat' })).toBeInTheDocument()
+    })
+    expect(screen.getAllByText('https://chat.company.com')).not.toHaveLength(0)
+    expect(screen.getByText('Realtime ready')).toHaveAttribute(
+      'data-realtime-url',
+      'wss://chat.company.com/ws',
+    )
+
+    await userEvent.click(screen.getByRole('button', { name: 'Switch to Local OpenCord' }))
+    expect(screen.getByText('Realtime ready')).toHaveAttribute(
+      'data-realtime-url',
+      'ws://localhost:8080/ws',
+    )
+
+    await userEvent.click(screen.getByRole('button', { name: 'Remove Company Chat' }))
+    expect(screen.queryByRole('button', { name: 'Switch to Company Chat' })).not.toBeInTheDocument()
+    expect(window.localStorage.getItem('opencord.serverConnections:v1')).toContain(
+      'Local OpenCord',
+    )
   })
 })

@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
-import { createInitialMobileState, mobileReducer, mobilePushTokenRequest } from './mobileState'
+import {
+  activeMobileServerConnection,
+  createInitialMobileState,
+  mobileReducer,
+  mobilePushTokenRequest,
+} from './mobileState'
 
 describe('mobile app state', () => {
   it('starts on the login screen with default OpenCord server data', () => {
@@ -169,5 +174,54 @@ describe('mobile app state', () => {
       status: 'failed',
       message: 'notification permission denied',
     })
+  })
+
+  it('adds, switches, and removes independent server connections on mobile', () => {
+    const initial = createInitialMobileState()
+    const withCompany = mobileReducer(initial, {
+      type: 'server.add',
+      baseUrl: 'https://chat.company.com',
+      displayName: 'Company Chat',
+      serverVersion: '0.1.0',
+      capabilities: ['messages'],
+      now: '2026-06-23T02:01:00.000Z',
+    })
+    const withCommunity = mobileReducer(withCompany, {
+      type: 'server.add',
+      baseUrl: 'https://cord.community.example',
+      displayName: 'Community',
+      now: '2026-06-23T02:02:00.000Z',
+    })
+
+    expect(withCommunity.serverConnections.connections.map((connection) => connection.displayName)).toEqual([
+      'Local OpenCord',
+      'Company Chat',
+      'Community',
+    ])
+    expect(activeMobileServerConnection(withCommunity)?.displayName).toBe('Community')
+    expect(withCommunity.serverUrl).toBe('https://cord.community.example')
+
+    const company = withCommunity.serverConnections.connections.find(
+      (connection) => connection.displayName === 'Company Chat',
+    )
+    expect(company).toBeDefined()
+
+    const switched = mobileReducer(withCommunity, {
+      type: 'server.switch',
+      connectionId: company!.id,
+    })
+    expect(activeMobileServerConnection(switched)?.displayName).toBe('Company Chat')
+    expect(switched.serverUrl).toBe('https://chat.company.com')
+
+    const removed = mobileReducer(switched, {
+      type: 'server.remove',
+      connectionId: company!.id,
+    })
+    expect(removed.serverConnections.connections.map((connection) => connection.displayName)).toEqual([
+      'Local OpenCord',
+      'Community',
+    ])
+    expect(activeMobileServerConnection(removed)?.displayName).toBe('Local OpenCord')
+    expect(removed.serverUrl).toBe('http://localhost:8080')
   })
 })

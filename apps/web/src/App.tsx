@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import {
-  DEFAULT_OPENCORD_SERVER_URL,
   createOpenCordApiClient,
   type ServerHealth,
 } from '@opencord/api-client'
@@ -10,6 +9,16 @@ import {
   realtimeUrlForServer,
   type RealtimeConnectionStatus,
 } from '@opencord/realtime'
+import {
+  activeServerConnection,
+  createDefaultServerConnectionState,
+  loadServerConnectionState,
+  removeServerConnection,
+  saveServerConnectionState,
+  switchServerConnection,
+  upsertServerConnection,
+  type ServerConnection,
+} from '@opencord/server-connections'
 
 import './App.css'
 
@@ -162,7 +171,14 @@ const members: Member[] = [
 ]
 
 export default function App() {
-  const [serverURL, setServerURL] = useState(DEFAULT_OPENCORD_SERVER_URL)
+  const [serverConnections, setServerConnections] = useState(() =>
+    loadBrowserServerConnectionState(),
+  )
+  const activeConnection =
+    activeServerConnection(serverConnections) ??
+    activeServerConnection(createDefaultServerConnectionState())!
+  const [serverURL, setServerURL] = useState(activeConnection.baseUrl)
+  const [serverDisplayName, setServerDisplayName] = useState('')
   const [health, setHealth] = useState<HealthState>({ status: 'checking' })
   const [realtimeStatus] = useState<RealtimeConnectionStatus>(INITIAL_REALTIME_STATUS)
   const [spaces] = useState(initialSpaces)
@@ -182,27 +198,61 @@ export default function App() {
     visibleChannels.find((channel) => channel.id === selectedChannelId) ?? visibleChannels[0]
   const channelMessages = messages.filter((message) => message.channelId === selectedChannel.id)
   const groupedMembers = useMemo(() => groupMembersByRole(members), [])
-  const realtimeURL = useMemo(() => safeRealtimeURL(serverURL), [serverURL])
+  const realtimeURL = useMemo(() => safeRealtimeURL(activeConnection.baseUrl), [activeConnection.baseUrl])
 
-  async function checkServer(targetURL = serverURL) {
+  async function checkServer(targetURL = activeConnection.baseUrl) {
     setHealth({ status: 'checking' })
     try {
-      setHealth(await createOpenCordApiClient({ baseUrl: targetURL }).health())
+      const result = await createOpenCordApiClient({ baseUrl: targetURL }).health()
+      setHealth(result)
+      return result
     } catch (error) {
-      setHealth({
+      const result = {
         status: 'offline',
         message: error instanceof Error ? error.message : 'Unable to reach server',
-      })
+      } satisfies ServerHealth
+      setHealth(result)
+      return result
     }
   }
 
   useEffect(() => {
-    void checkServer(DEFAULT_OPENCORD_SERVER_URL)
+    void checkServer(activeConnection.baseUrl)
   }, [])
 
-  function submitServer(event: FormEvent<HTMLFormElement>) {
+  useEffect(() => {
+    saveBrowserServerConnectionState(serverConnections)
+  }, [serverConnections])
+
+  async function submitServer(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    void checkServer(serverURL)
+    const targetURL = serverURL
+    const result = await checkServer(targetURL)
+    setServerConnections((current) =>
+      upsertServerConnection(current, {
+        baseUrl: targetURL,
+        displayName: serverDisplayName,
+        serverVersion: result.status === 'online' ? result.version : 'unknown',
+      }),
+    )
+    setServerDisplayName('')
+  }
+
+  function selectServerConnection(connection: ServerConnection) {
+    setServerConnections((current) => switchServerConnection(current, connection.id))
+    setServerURL(connection.baseUrl)
+    setServerDisplayName('')
+    void checkServer(connection.baseUrl)
+  }
+
+  function deleteServerConnection(connection: ServerConnection) {
+    const next = removeServerConnection(serverConnections, connection.id)
+    const nextActive = activeServerConnection(next)
+    setServerConnections(next)
+    if (nextActive) {
+      setServerURL(nextActive.baseUrl)
+      void checkServer(nextActive.baseUrl)
+    }
   }
 
   function selectSpace(spaceId: string) {
@@ -339,13 +389,21 @@ export default function App() {
       <nav className="channel-sidebar" aria-label="Channel navigation">
         <div className="server-card">
           <div>
-            <strong>{selectedSpace.name}</strong>
-            <span>Self-hosted workspace</span>
+            <strong>{activeConnection.displayName}</strong>
+            <span>{activeConnection.baseUrl}</span>
           </div>
           <StatusBadge health={health} />
         </div>
 
         <form className="server-form" onSubmit={submitServer}>
+          <label htmlFor="server-display-name">Server display name</label>
+          <input
+            id="server-display-name"
+            name="server-display-name"
+            value={serverDisplayName}
+            onChange={(event) => setServerDisplayName(event.target.value)}
+            placeholder={activeConnection.displayName}
+          />
           <label htmlFor="server-url">Server URL</label>
           <div>
             <input
@@ -355,11 +413,39 @@ export default function App() {
               value={serverURL}
               onChange={(event) => setServerURL(event.target.value)}
             />
-            <button type="submit" aria-label="Check server">
-              Check
+            <button type="submit" aria-label="Add server">
+              Add
             </button>
           </div>
         </form>
+
+        <section className="server-connections" aria-label="Server connections">
+          <h2>Servers</h2>
+          {serverConnections.connections.map((connection) => (
+            <div
+              key={connection.id}
+              className={`server-connection-row ${
+                connection.id === activeConnection.id ? 'is-active' : ''
+              }`}
+            >
+              <button
+                type="button"
+                aria-label={`Switch to ${connection.displayName}`}
+                onClick={() => selectServerConnection(connection)}
+              >
+                <strong>{connection.displayName}</strong>
+                <span>{connection.baseUrl}</span>
+              </button>
+              <button
+                type="button"
+                aria-label={`Remove ${connection.displayName}`}
+                onClick={() => deleteServerConnection(connection)}
+              >
+                Remove
+              </button>
+            </div>
+          ))}
+        </section>
 
         <button
           className="create-channel-button"
@@ -703,4 +789,22 @@ function initialsFor(name: string) {
     .join('')
     .slice(0, 2)
     .toUpperCase()
+}
+
+function loadBrowserServerConnectionState() {
+  if (typeof window === 'undefined') {
+    return createDefaultServerConnectionState()
+  }
+
+  return loadServerConnectionState(window.localStorage)
+}
+
+function saveBrowserServerConnectionState(
+  state: ReturnType<typeof createDefaultServerConnectionState>,
+) {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  saveServerConnectionState(window.localStorage, state)
 }

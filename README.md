@@ -18,14 +18,15 @@ pnpm install
 
 ## Apps
 
-- `apps/web`: React/Vite web client shell.
+- `apps/web`: React/Vite web client shell with multi-server connection switching.
 - `apps/desktop`: Electron shell placeholder for Phase 02.
-- `apps/mobile`: React Native/Expo shell placeholder for Phase 02.
+- `apps/mobile`: React Native/Expo shell with mobile chat and connection state.
 
 ## Packages
 
 - `packages/api-client`: REST API client, push token methods, and generated SDK boundary.
 - `packages/realtime`: realtime gateway client boundary.
+- `packages/server-connections`: shared multi-server connection manager and persistence helpers.
 - `packages/media`: media integration client boundary.
 - `packages/types`: shared TypeScript types.
 - `packages/validation`: shared validation schemas.
@@ -41,4 +42,5 @@ pnpm --filter web test
 pnpm --filter web build
 ```
 
-The web shell defaults to `http://localhost:8080` and can connect to another compatible OpenCord server by changing the server URL field.
+The web shell defaults to `http://localhost:8080` and can add, switch, remove,
+and persist multiple compatible OpenCord server connections.

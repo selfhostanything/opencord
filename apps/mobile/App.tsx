@@ -1,4 +1,4 @@
-import { useMemo, useReducer, useState } from 'react'
+import { useEffect, useMemo, useReducer, useState } from 'react'
 import {
   FlatList,
   Pressable,
@@ -10,6 +10,7 @@ import {
 } from 'react-native'
 
 import {
+  activeMobileServerConnection,
   createInitialMobileState,
   messagesForChannel,
   mobileReducer,
@@ -24,10 +25,19 @@ export default function App() {
   const [email, setEmail] = useState('')
   const [composerText, setComposerText] = useState('')
   const activeChannel = selectedChannel(state)
+  const activeServer = activeMobileServerConnection(state)
   const visibleMessages = useMemo(() => messagesForChannel(state), [state])
+
+  useEffect(() => {
+    setServerUrl(state.serverUrl)
+  }, [state.serverUrl])
 
   function submitLogin() {
     dispatch({ type: 'login.submit', serverUrl, email })
+  }
+
+  function switchServer(connectionId: string) {
+    dispatch({ type: 'server.switch', connectionId })
   }
 
   function sendMessage() {
@@ -62,6 +72,32 @@ export default function App() {
           <Pressable accessibilityRole="button" onPress={submitLogin} style={styles.primaryButton}>
             <Text style={styles.primaryButtonText}>Log in</Text>
           </Pressable>
+          <View style={styles.serverList}>
+            {state.serverConnections.connections.map((connection) => (
+              <View key={connection.id} style={styles.serverRow}>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => switchServer(connection.id)}
+                  style={[
+                    styles.serverSwitchButton,
+                    connection.id === state.serverConnections.activeConnectionId
+                      ? styles.activeServerSwitchButton
+                      : null,
+                  ]}
+                >
+                  <Text style={styles.serverName}>{connection.displayName}</Text>
+                  <Text style={styles.subtle}>{connection.baseUrl}</Text>
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => dispatch({ type: 'server.remove', connectionId: connection.id })}
+                  style={styles.removeServerButton}
+                >
+                  <Text style={styles.primaryButtonText}>Remove</Text>
+                </Pressable>
+              </View>
+            ))}
+          </View>
         </View>
       </SafeAreaView>
     )
@@ -73,7 +109,7 @@ export default function App() {
         <View style={styles.header}>
           <View>
             <Text style={styles.title}>Channels</Text>
-            <Text style={styles.subtle}>{state.serverUrl}</Text>
+            <Text style={styles.subtle}>{activeServer?.displayName ?? state.serverUrl}</Text>
           </View>
           <Text style={styles.status}>{state.realtimeStatus}</Text>
         </View>
@@ -176,6 +212,41 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     color: '#f5f6f3',
     paddingHorizontal: 14,
+  },
+  serverList: {
+    gap: 8,
+    marginTop: 6,
+  },
+  serverRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  serverSwitchButton: {
+    borderColor: '#333a36',
+    borderRadius: 8,
+    borderWidth: 1,
+    flex: 1,
+    minHeight: 56,
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+  },
+  activeServerSwitchButton: {
+    borderColor: '#28796d',
+    backgroundColor: '#1d2b28',
+  },
+  serverName: {
+    color: '#f5f6f3',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  removeServerButton: {
+    alignItems: 'center',
+    backgroundColor: '#353535',
+    borderRadius: 8,
+    justifyContent: 'center',
+    minHeight: 42,
+    minWidth: 82,
   },
   primaryButton: {
     alignItems: 'center',

@@ -9,9 +9,12 @@
   "scripts": {
     "test": "vitest run",
     "build": "tsc -p tsconfig.json",
-    "lint": "tsc -p tsconfig.json --noEmit"
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "generate:openapi": "openapi-typescript ${OPENAPI_SPEC_PATH:-../../../opencord-server/openapi/openapi.yaml} -o src/generated/openapi.ts",
+    "check:openapi": "pnpm generate:openapi && test -s src/generated/openapi.ts && git diff --exit-code -- src/generated/openapi.ts"
   },
   "devDependencies": {
+    "openapi-typescript": "^7.13.0",
     "typescript": "~6.0.3",
     "vitest": "^4.1.9"
   },

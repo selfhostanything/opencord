@@ -1,8 +1,10 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { createMemoryHistory } from '@tanstack/react-router'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import App from './App'
+import { createAppRouter } from './app/router'
 
 describe('OpenCord web chat UI', () => {
   const fetchMock = vi.fn()
@@ -23,7 +25,7 @@ describe('OpenCord web chat UI', () => {
   it('renders a Discord-like workspace with rail, channels, messages, composer, and members', async () => {
     render(<App />)
 
-    expect(screen.getByLabelText('Space rail')).toBeInTheDocument()
+    expect(await screen.findByLabelText('Space rail')).toBeInTheDocument()
     expect(screen.getByRole('navigation', { name: 'Channel navigation' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '# general' })).toBeInTheDocument()
     expect(screen.getByLabelText('Message timeline')).toHaveTextContent('Welcome to OpenCord')
@@ -39,6 +41,68 @@ describe('OpenCord web chat UI', () => {
     })
     expect(fetchMock).toHaveBeenCalledWith('http://localhost:8080/healthz', {
       headers: { Accept: 'application/json' },
+    })
+  })
+
+  it('renders typed workspace routes for channel, calendar, developer, and meeting surfaces', async () => {
+    const router = createAppRouter({
+      history: createMemoryHistory({
+        initialEntries: ['/servers/local/spaces/opencord/channels/general/calendar'],
+      }),
+    })
+
+    render(<App router={router} />)
+
+    expect(await screen.findByRole('heading', { name: 'Calendar' })).toBeInTheDocument()
+
+    await router.navigate({
+      to: '/servers/$serverId/spaces/$spaceId/channels/$channelId/developers',
+      params: { serverId: 'local', spaceId: 'opencord', channelId: 'general' },
+    })
+
+    await waitFor(() => {
+      expect(screen.getByRole('region', { name: 'Developer settings' })).toBeInTheDocument()
+    })
+
+    await router.navigate({
+      to: '/servers/$serverId/spaces/$spaceId/channels/$channelId/meetings/$meetingId',
+      params: {
+        serverId: 'local',
+        spaceId: 'opencord',
+        channelId: 'general',
+        meetingId: 'meeting-roadmap-review',
+      },
+    })
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: '# general' })).toBeInTheDocument()
+    })
+  })
+
+  it('renders top-level shortcut routes for calendar, developers, and meetings', async () => {
+    const router = createAppRouter({
+      history: createMemoryHistory({
+        initialEntries: ['/calendar'],
+      }),
+    })
+
+    render(<App router={router} />)
+
+    expect(await screen.findByRole('heading', { name: 'Calendar' })).toBeInTheDocument()
+
+    await router.navigate({ to: '/developers' })
+
+    await waitFor(() => {
+      expect(screen.getByRole('region', { name: 'Developer settings' })).toBeInTheDocument()
+    })
+
+    await router.navigate({
+      to: '/meetings/$meetingId',
+      params: { meetingId: 'meeting-roadmap-review' },
+    })
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Leave meeting' })).toBeInTheDocument()
     })
   })
 

@@ -17,9 +17,10 @@ pnpm install
 
 - `apps/web`: React/Vite web client with multi-server switching, chat UI,
   calendar tab, meeting room UI, voice controls, screen share controls, rich
-  embeds, and developer bot/webhook panels.
+  embeds, developer bot/webhook panels, TanStack Router, TanStack Query, and
+  Zustand local UI state.
 - `apps/desktop`: Electron shell for the web client.
-- `apps/mobile`: React Native/Expo app shell with mobile chat, voice, and
+- `apps/mobile`: plain React Native app shell with mobile chat, voice, and
   connection state.
 
 ## Packages
@@ -52,3 +53,22 @@ Verified customer custom domains work as normal server URLs. For example, once
 `customer.example.com` resolves through the OpenCord ingress and the server
 custom-domain mapping is active, the official web, desktop, and mobile clients
 can connect to `https://customer.example.com`.
+
+## OpenAPI Boundary
+
+`packages/api-client` keeps the hand-written ergonomic client, but generated
+OpenAPI types sit at the package boundary:
+
+```bash
+pnpm --filter @opencord/api-client generate:openapi
+pnpm --filter @opencord/api-client check:openapi
+```
+
+By default the generator reads the sibling server repo at:
+
+```text
+../../../opencord-server/openapi/openapi.yaml
+```
+
+Set `OPENAPI_SPEC_PATH` when generating from another checkout or downloaded
+server artifact.

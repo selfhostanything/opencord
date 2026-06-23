@@ -1,3 +1,5 @@
+export type { components, operations, paths } from './generated/openapi'
+
 export const DEFAULT_OPENCORD_SERVER_URL = 'http://localhost:8080'
 
 export type OpenCordFetch = (input: string, init?: RequestInit) => Promise<Response>

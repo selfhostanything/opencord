@@ -1,11 +1,23 @@
 import { describe, expect, it, vi } from 'vitest'
 
+import type { paths } from './generated/openapi'
 import {
   DEFAULT_OPENCORD_SERVER_URL,
   OpenCordApiError,
   createOpenCordApiClient,
   normalizeOpenCordBaseUrl,
 } from './index'
+
+const requiredOpenApiPaths = [
+  '/healthz',
+  '/.well-known/opencord',
+  '/auth/login',
+  '/push-tokens',
+  '/voice/channels/{channel_id}/join',
+  '/join/{join_slug}',
+  '/organizations/{organization_id}/bot-applications',
+  '/channels/{channel_id}/webhooks',
+] as const satisfies readonly (keyof paths)[]
 
 function jsonResponse(body: unknown, init?: ResponseInit) {
   return new Response(JSON.stringify(body), {
@@ -16,6 +28,12 @@ function jsonResponse(body: unknown, init?: ResponseInit) {
 }
 
 describe('OpenCord API client', () => {
+  it('keeps generated OpenAPI path types at the package boundary', () => {
+    expect(requiredOpenApiPaths).toContain('/healthz')
+    expect(requiredOpenApiPaths).toContain('/auth/login')
+    expect(requiredOpenApiPaths).toContain('/channels/{channel_id}/webhooks')
+  })
+
   it('normalizes base URLs for any compatible OpenCord server', () => {
     expect(normalizeOpenCordBaseUrl()).toBe(DEFAULT_OPENCORD_SERVER_URL)
     expect(normalizeOpenCordBaseUrl(' https://chat.example.com/// ')).toBe(

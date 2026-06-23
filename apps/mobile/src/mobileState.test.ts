@@ -9,8 +9,17 @@ import {
   mobilePushTokenRequest,
   mobileVoiceParticipantsForChannel,
 } from './mobileState'
+import { mobileRuntime } from './runtime'
 
 describe('mobile app state', () => {
+  it('declares the plain React Native runtime without Expo', () => {
+    expect(mobileRuntime).toEqual({
+      appRegistryName: 'OpenCord',
+      framework: 'react-native-cli',
+      usesExpo: false,
+    })
+  })
+
   it('starts on the login screen with default OpenCord server data', () => {
     const state = createInitialMobileState()
 

@@ -1,6 +1,6 @@
 # OpenCord Mobile
 
-React Native/Expo mobile shell for OpenCord.
+Plain React Native mobile shell for OpenCord.
 
 ## Current Surface
 
@@ -20,10 +20,13 @@ React Native/Expo mobile shell for OpenCord.
 fnm exec --using 26 npx --yes pnpm@11.8.0 --filter mobile start
 fnm exec --using 26 npx --yes pnpm@11.8.0 --filter mobile test
 fnm exec --using 26 npx --yes pnpm@11.8.0 --filter mobile build
+fnm exec --using 26 npx --yes pnpm@11.8.0 --filter mobile ios
+fnm exec --using 26 npx --yes pnpm@11.8.0 --filter mobile android
 ```
 
-Validate Expo config:
+## Native Project Ownership
 
-```bash
-fnm exec --using 26 npx --yes pnpm@11.8.0 --filter mobile exec expo config --json
-```
+The mobile package uses React Native CLI directly, not Expo. Native iOS and
+Android project ownership lives under `ios/` and `android/` so future WebRTC,
+push, secure storage, media permissions, and app-store build work can use the
+native platform projects directly.

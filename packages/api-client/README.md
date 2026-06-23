@@ -32,14 +32,15 @@ Typed REST client boundary shared by web, desktop, and mobile clients.
 - `CreateIncomingWebhookRequest`
 - `IncomingWebhook`
 - `IncomingWebhookWithToken`
+- generated OpenAPI `paths`, `components`, and `operations` types
 
 The v1 hand-written SDK covers server health, well-known discovery,
 `/api/version`, `/api/capabilities`, `GET /auth/oidc/providers`,
 `POST /auth/oidc/callback`, `POST /push-tokens`, `GET /push-tokens`,
 `POST /voice/channels/{channel_id}/join`, `GET /join/{join_slug}`, bot
 application management, and incoming webhook management.
-Future generated OpenAPI clients can live behind this package boundary without
-changing app imports.
+Generated OpenAPI types live behind this package boundary without changing app
+imports.
 
 Authenticated calls accept a bearer session token through:
 
@@ -86,4 +87,14 @@ await client.deleteIncomingWebhook(channelId, rotated.id)
 fnm exec --using 26 npx --yes pnpm@11.8.0 --filter @opencord/api-client test
 fnm exec --using 26 npx --yes pnpm@11.8.0 --filter @opencord/api-client lint
 fnm exec --using 26 npx --yes pnpm@11.8.0 --filter @opencord/api-client build
+fnm exec --using 26 npx --yes pnpm@11.8.0 --filter @opencord/api-client check:openapi
 ```
+
+Generate the contract types from the sibling server checkout:
+
+```bash
+fnm exec --using 26 npx --yes pnpm@11.8.0 --filter @opencord/api-client generate:openapi
+```
+
+Use `OPENAPI_SPEC_PATH=/path/to/openapi.yaml` when the server contract is not at
+the default sibling repo path.

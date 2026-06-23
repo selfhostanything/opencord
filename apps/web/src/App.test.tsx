@@ -27,6 +27,10 @@ describe('OpenCord web chat UI', () => {
     expect(screen.getByRole('heading', { name: '# general' })).toBeInTheDocument()
     expect(screen.getByLabelText('Message timeline')).toHaveTextContent('Welcome to OpenCord')
     expect(screen.getByLabelText('Message composer')).toBeInTheDocument()
+    expect(screen.getByText('Realtime ready')).toHaveAttribute(
+      'data-realtime-url',
+      'ws://localhost:8080/ws',
+    )
     expect(screen.getByRole('complementary', { name: 'Members' })).toHaveTextContent('Product')
 
     await waitFor(() => {

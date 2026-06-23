@@ -1,5 +1,27 @@
 # Realtime Client
 
-Realtime gateway client boundary for WebSocket and event delivery code.
+Typed WebSocket gateway client shared by web, desktop, and mobile clients.
 
-Phase 00 keeps this package empty until the gateway contract is implemented.
+## Current Surface
+
+- `realtimeUrlForServer`
+- `createOpenCordRealtimeClient`
+- `OpenCordRealtimeClient`
+- `RealtimeConnectionStatus`
+- `RealtimeIncomingEnvelope`
+- `RealtimeClientMessage`
+- `INITIAL_REALTIME_STATUS`
+
+The v1 client matches the server `/ws` contract:
+
+- Auth token is passed as a `token` query parameter.
+- Server events use `{ id, type, organization_id, scope, occurred_at, data }`.
+- Client messages support `ping`, `typing.start`, and `typing.stop`.
+
+## Development
+
+```bash
+fnm exec --using 26 npx --yes pnpm@11.8.0 --filter @opencord/realtime test
+fnm exec --using 26 npx --yes pnpm@11.8.0 --filter @opencord/realtime lint
+fnm exec --using 26 npx --yes pnpm@11.8.0 --filter @opencord/realtime build
+```

@@ -24,6 +24,7 @@
   },
   "dependencies": {
     "@opencord/api-client": "workspace:*",
+    "@opencord/realtime": "workspace:*",
     "react": "^19.2.7",
     "react-dom": "^19.2.7"
   }

@@ -5,6 +5,11 @@ import {
   createOpenCordApiClient,
   type ServerHealth,
 } from '@opencord/api-client'
+import {
+  INITIAL_REALTIME_STATUS,
+  realtimeUrlForServer,
+  type RealtimeConnectionStatus,
+} from '@opencord/realtime'
 
 import './App.css'
 
@@ -159,6 +164,7 @@ const members: Member[] = [
 export default function App() {
   const [serverURL, setServerURL] = useState(DEFAULT_OPENCORD_SERVER_URL)
   const [health, setHealth] = useState<HealthState>({ status: 'checking' })
+  const [realtimeStatus] = useState<RealtimeConnectionStatus>(INITIAL_REALTIME_STATUS)
   const [spaces] = useState(initialSpaces)
   const [channels, setChannels] = useState(initialChannels)
   const [messages, setMessages] = useState(initialMessages)
@@ -176,6 +182,7 @@ export default function App() {
     visibleChannels.find((channel) => channel.id === selectedChannelId) ?? visibleChannels[0]
   const channelMessages = messages.filter((message) => message.channelId === selectedChannel.id)
   const groupedMembers = useMemo(() => groupMembersByRole(members), [])
+  const realtimeURL = useMemo(() => safeRealtimeURL(serverURL), [serverURL])
 
   async function checkServer(targetURL = serverURL) {
     setHealth({ status: 'checking' })
@@ -468,8 +475,8 @@ export default function App() {
         </section>
 
         {selectedChannel.canSend ? (
-          <div className="typing-line">
-            {composerText.trim() ? 'You are typing...' : 'Realtime ready'}
+          <div className="typing-line" data-realtime-url={realtimeURL}>
+            {composerText.trim() ? 'You are typing...' : realtimeStatusText(realtimeStatus)}
           </div>
         ) : (
           <div className="permission-banner">You can view this channel but cannot send messages.</div>
@@ -655,6 +662,28 @@ function formatBytes(sizeBytes: number) {
 
   const mib = kib / 1024
   return `${mib.toFixed(mib >= 10 ? 0 : 1)} MiB`
+}
+
+function safeRealtimeURL(serverURL: string) {
+  try {
+    return realtimeUrlForServer(serverURL)
+  } catch {
+    return undefined
+  }
+}
+
+function realtimeStatusText(status: RealtimeConnectionStatus) {
+  switch (status) {
+    case 'connecting':
+      return 'Realtime connecting'
+    case 'open':
+      return 'Realtime connected'
+    case 'error':
+    case 'closed':
+      return 'Realtime disconnected'
+    case 'idle':
+      return 'Realtime ready'
+  }
 }
 
 function normalizeChannelName(name: string) {

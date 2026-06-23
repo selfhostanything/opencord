@@ -294,4 +294,107 @@ describe('OpenCord API client', () => {
       },
     )
   })
+
+  it('resolves meeting join URLs through the typed API', async () => {
+    const fetchMock = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>()
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        meeting: {
+          id: '01973f83-f22a-73ba-ae76-5a045c52fca1',
+          organization_id: '01973f83-f22a-73ba-ae76-5a045c52fc96',
+          space_id: null,
+          channel_id: null,
+          created_by_user_id: '01973f83-f22a-73ba-ae76-5a045c52fc97',
+          title: 'Roadmap Review',
+          description: 'Launch scope',
+          status: 'scheduled',
+          starts_at: '2026-06-24T09:00:00Z',
+          ends_at: '2026-06-24T09:30:00Z',
+          timezone: 'Asia/Bangkok',
+          join_slug: 'mtg-01973f83f22a73baae765a045c52fca1',
+          join_url: 'https://chat.example.com/join/mtg-01973f83f22a73baae765a045c52fca1',
+          cancelled_at: null,
+          attendees: [
+            {
+              id: '01973f83-f22a-73ba-ae76-5a045c52fca2',
+              meeting_id: '01973f83-f22a-73ba-ae76-5a045c52fca1',
+              user_id: null,
+              email: 'external@example.com',
+              display_name: 'External Guest',
+              role: 'required',
+              response_status: 'needs_action',
+            },
+          ],
+          reminders: [
+            {
+              id: '01973f83-f22a-73ba-ae76-5a045c52fca3',
+              meeting_id: '01973f83-f22a-73ba-ae76-5a045c52fca1',
+              recipient_user_id: null,
+              recipient_email: 'external@example.com',
+              channel: 'email',
+              offset_minutes: 10,
+              scheduled_for: '2026-06-24T08:50:00Z',
+              status: 'pending',
+            },
+          ],
+        },
+      }),
+    )
+    const client = createOpenCordApiClient({
+      baseUrl: 'https://chat.example.com',
+      fetch: fetchMock,
+      sessionToken: 'session-token',
+    })
+
+    await expect(
+      client.resolveMeetingJoinUrl('mtg-01973f83f22a73baae765a045c52fca1'),
+    ).resolves.toEqual({
+      id: '01973f83-f22a-73ba-ae76-5a045c52fca1',
+      organizationId: '01973f83-f22a-73ba-ae76-5a045c52fc96',
+      spaceId: null,
+      channelId: null,
+      createdByUserId: '01973f83-f22a-73ba-ae76-5a045c52fc97',
+      title: 'Roadmap Review',
+      description: 'Launch scope',
+      status: 'scheduled',
+      startsAt: '2026-06-24T09:00:00Z',
+      endsAt: '2026-06-24T09:30:00Z',
+      timezone: 'Asia/Bangkok',
+      joinSlug: 'mtg-01973f83f22a73baae765a045c52fca1',
+      joinUrl: 'https://chat.example.com/join/mtg-01973f83f22a73baae765a045c52fca1',
+      cancelledAt: null,
+      attendees: [
+        {
+          id: '01973f83-f22a-73ba-ae76-5a045c52fca2',
+          meetingId: '01973f83-f22a-73ba-ae76-5a045c52fca1',
+          userId: null,
+          email: 'external@example.com',
+          displayName: 'External Guest',
+          role: 'required',
+          responseStatus: 'needs_action',
+        },
+      ],
+      reminders: [
+        {
+          id: '01973f83-f22a-73ba-ae76-5a045c52fca3',
+          meetingId: '01973f83-f22a-73ba-ae76-5a045c52fca1',
+          recipientUserId: null,
+          recipientEmail: 'external@example.com',
+          channel: 'email',
+          offsetMinutes: 10,
+          scheduledFor: '2026-06-24T08:50:00Z',
+          status: 'pending',
+        },
+      ],
+    })
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://chat.example.com/join/mtg-01973f83f22a73baae765a045c52fca1',
+      {
+        headers: {
+          Accept: 'application/json',
+          Authorization: 'Bearer session-token',
+        },
+      },
+    )
+  })
 })

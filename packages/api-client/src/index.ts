@@ -76,6 +76,46 @@ export type VoiceJoin = {
   media: MediaRoomToken
 }
 
+export type MeetingAttendee = {
+  id: string
+  meetingId: string
+  userId: string | null
+  email: string | null
+  displayName: string | null
+  role: string
+  responseStatus: string
+}
+
+export type MeetingReminder = {
+  id: string
+  meetingId: string
+  recipientUserId: string | null
+  recipientEmail: string | null
+  channel: string
+  offsetMinutes: number
+  scheduledFor: string
+  status: string
+}
+
+export type Meeting = {
+  id: string
+  organizationId: string
+  spaceId: string | null
+  channelId: string | null
+  createdByUserId: string
+  title: string
+  description: string | null
+  status: string
+  startsAt: string
+  endsAt: string
+  timezone: string
+  joinSlug: string
+  joinUrl: string
+  cancelledAt: string | null
+  attendees: MeetingAttendee[]
+  reminders: MeetingReminder[]
+}
+
 export type OpenCordApiClientOptions = {
   baseUrl?: string
   fetch?: OpenCordFetch
@@ -147,6 +187,50 @@ type VoiceParticipantPayload = {
 type VoiceJoinPayload = {
   voice?: unknown
   media?: unknown
+}
+
+type MeetingAttendeePayload = {
+  id?: unknown
+  meeting_id?: unknown
+  user_id?: unknown
+  email?: unknown
+  display_name?: unknown
+  role?: unknown
+  response_status?: unknown
+}
+
+type MeetingReminderPayload = {
+  id?: unknown
+  meeting_id?: unknown
+  recipient_user_id?: unknown
+  recipient_email?: unknown
+  channel?: unknown
+  offset_minutes?: unknown
+  scheduled_for?: unknown
+  status?: unknown
+}
+
+type MeetingPayload = {
+  id?: unknown
+  organization_id?: unknown
+  space_id?: unknown
+  channel_id?: unknown
+  created_by_user_id?: unknown
+  title?: unknown
+  description?: unknown
+  status?: unknown
+  starts_at?: unknown
+  ends_at?: unknown
+  timezone?: unknown
+  join_slug?: unknown
+  join_url?: unknown
+  cancelled_at?: unknown
+  attendees?: unknown
+  reminders?: unknown
+}
+
+type MeetingResourcePayload = {
+  meeting?: unknown
 }
 
 type ErrorPayload = {
@@ -289,6 +373,14 @@ export class OpenCordApiClient {
     }
   }
 
+  async resolveMeetingJoinUrl(joinSlug: string): Promise<Meeting> {
+    const payload = await this.requestJson<MeetingResourcePayload>(
+      `/join/${encodeURIComponent(joinSlug)}`,
+    )
+
+    return meetingFromPayload(payload.meeting)
+  }
+
   private async requestJson<T>(path: string, init: RequestInit = {}): Promise<T> {
     const response = await this.fetchImpl(this.endpoint(path), {
       ...init,
@@ -411,6 +503,58 @@ function voiceParticipantFromPayload(value: unknown): VoiceParticipant {
   }
 }
 
+function meetingFromPayload(value: unknown): Meeting {
+  const payload = objectValue(value) as MeetingPayload
+
+  return {
+    id: stringValue(payload.id, ''),
+    organizationId: stringValue(payload.organization_id, ''),
+    spaceId: nullableStringValue(payload.space_id),
+    channelId: nullableStringValue(payload.channel_id),
+    createdByUserId: stringValue(payload.created_by_user_id, ''),
+    title: stringValue(payload.title, ''),
+    description: nullableStringValue(payload.description),
+    status: stringValue(payload.status, 'scheduled'),
+    startsAt: stringValue(payload.starts_at, ''),
+    endsAt: stringValue(payload.ends_at, ''),
+    timezone: stringValue(payload.timezone, 'UTC'),
+    joinSlug: stringValue(payload.join_slug, ''),
+    joinUrl: stringValue(payload.join_url, ''),
+    cancelledAt: nullableStringValue(payload.cancelled_at),
+    attendees: arrayValue(payload.attendees).map(meetingAttendeeFromPayload),
+    reminders: arrayValue(payload.reminders).map(meetingReminderFromPayload),
+  }
+}
+
+function meetingAttendeeFromPayload(value: unknown): MeetingAttendee {
+  const payload = objectValue(value) as MeetingAttendeePayload
+
+  return {
+    id: stringValue(payload.id, ''),
+    meetingId: stringValue(payload.meeting_id, ''),
+    userId: nullableStringValue(payload.user_id),
+    email: nullableStringValue(payload.email),
+    displayName: nullableStringValue(payload.display_name),
+    role: stringValue(payload.role, 'required'),
+    responseStatus: stringValue(payload.response_status, 'needs_action'),
+  }
+}
+
+function meetingReminderFromPayload(value: unknown): MeetingReminder {
+  const payload = objectValue(value) as MeetingReminderPayload
+
+  return {
+    id: stringValue(payload.id, ''),
+    meetingId: stringValue(payload.meeting_id, ''),
+    recipientUserId: nullableStringValue(payload.recipient_user_id),
+    recipientEmail: nullableStringValue(payload.recipient_email),
+    channel: stringValue(payload.channel, 'in_app'),
+    offsetMinutes: numberValue(payload.offset_minutes, 0),
+    scheduledFor: stringValue(payload.scheduled_for, ''),
+    status: stringValue(payload.status, 'pending'),
+  }
+}
+
 function pushTokenFromPayload(value: unknown): PushToken {
   const payload = objectValue(value) as PushTokenPayload
 
@@ -423,6 +567,14 @@ function pushTokenFromPayload(value: unknown): PushToken {
     createdAt: stringValue(payload.created_at, ''),
     updatedAt: stringValue(payload.updated_at, ''),
   }
+}
+
+function arrayValue(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : []
+}
+
+function numberValue(value: unknown, fallback: number) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback
 }
 
 function objectValue(value: unknown) {

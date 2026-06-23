@@ -17,11 +17,15 @@ Typed REST client boundary shared by web, desktop, and mobile clients.
 - `VoiceParticipant`
 - `MediaRoomToken`
 - `VoiceJoin`
+- `Meeting`
+- `MeetingAttendee`
+- `MeetingReminder`
 
 The v1 hand-written SDK covers server health, well-known discovery,
 `/api/version`, `/api/capabilities`, `POST /push-tokens`, `GET /push-tokens`,
-and `POST /voice/channels/{channel_id}/join`. Future generated OpenAPI clients
-can live behind this package boundary without changing app imports.
+`POST /voice/channels/{channel_id}/join`, and `GET /join/{join_slug}`. Future
+generated OpenAPI clients can live behind this package boundary without
+changing app imports.
 
 Authenticated calls accept a bearer session token through:
 
@@ -38,6 +42,12 @@ const join = await client.joinVoiceChannel(channelId, {
   selfMute: false,
   selfDeaf: false,
 })
+```
+
+Meeting join URLs resolve through the same authenticated client:
+
+```ts
+const meeting = await client.resolveMeetingJoinUrl(joinSlug)
 ```
 
 ## Development

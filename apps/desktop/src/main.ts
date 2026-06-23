@@ -1,7 +1,13 @@
 import path from 'node:path'
-import { app, BrowserWindow, shell } from 'electron'
+import { app, BrowserWindow, Notification, ipcMain, shell } from 'electron'
 
 import { createMainWindowOptions, resolveRendererEntry } from './config'
+import {
+  MESSAGE_NOTIFICATION_CHANNEL,
+  buildMessageNotification,
+  isMessageNotificationPayload,
+  shouldShowMessageNotification,
+} from './notifications'
 
 const appRoot = path.resolve(__dirname, '..')
 const repoRoot = path.resolve(appRoot, '../..')
@@ -9,6 +15,24 @@ const preloadPath = path.join(__dirname, 'preload.js')
 const smokeMode = process.argv.includes('--smoke')
 
 let mainWindow: BrowserWindow | null = null
+
+ipcMain.handle(MESSAGE_NOTIFICATION_CHANNEL, (_event, payload: unknown) => {
+  if (!isMessageNotificationPayload(payload) || !Notification.isSupported()) {
+    return false
+  }
+
+  if (
+    !shouldShowMessageNotification({
+      isWindowFocused: mainWindow?.isFocused() ?? false,
+      own: payload.own,
+    })
+  ) {
+    return false
+  }
+
+  new Notification(buildMessageNotification(payload)).show()
+  return true
+})
 
 async function createWindow() {
   const window = new BrowserWindow(createMainWindowOptions(preloadPath))

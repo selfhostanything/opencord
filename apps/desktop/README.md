@@ -8,6 +8,7 @@ Electron desktop shell for the OpenCord web renderer.
 - Loads `OPENCORD_DESKTOP_RENDERER_URL` when running against a Vite dev server.
 - Uses secure renderer defaults: `contextIsolation`, `sandbox`, `webSecurity`, and no Node integration.
 - Exposes a narrow preload bridge as `window.openCordDesktop`.
+- Provides `window.openCordDesktop.notifications.showMessage(...)` for validated native message notifications.
 - Opens external navigation through the OS browser.
 
 ## Development

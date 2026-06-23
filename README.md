@@ -24,7 +24,7 @@ pnpm install
 
 ## Packages
 
-- `packages/api-client`: REST API client, push token methods, and generated SDK boundary.
+- `packages/api-client`: REST API client, push token methods, voice join method, and generated SDK boundary.
 - `packages/realtime`: realtime gateway client boundary.
 - `packages/server-connections`: shared multi-server connection manager and persistence helpers.
 - `packages/media`: media integration client boundary.

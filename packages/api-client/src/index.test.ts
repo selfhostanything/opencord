@@ -208,4 +208,90 @@ describe('OpenCord API client', () => {
       },
     })
   })
+
+  it('joins a voice channel with bearer auth and maps media join config', async () => {
+    const fetchMock = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>()
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        voice: {
+          channel_id: '01973f83-f22a-73ba-ae76-5a045c52fc98',
+          user_id: '01973f83-f22a-73ba-ae76-5a045c52fc97',
+          self_mute: false,
+          self_deaf: false,
+        },
+        media: {
+          provider: 'livekit',
+          server_url: 'ws://localhost:7880',
+          region: 'local',
+          room_type: 'voice_channel',
+          room_name: 'opencord_voice_01973f83f22a73baae765a045c52fc98',
+          organization_id: '01973f83-f22a-73ba-ae76-5a045c52fc96',
+          space_id: '01973f83-f22a-73ba-ae76-5a045c52fc95',
+          channel_id: '01973f83-f22a-73ba-ae76-5a045c52fc98',
+          participant_identity: '01973f83-f22a-73ba-ae76-5a045c52fc97',
+          participant_token: 'livekit.jwt',
+          expires_at: '2026-06-23T03:30:00.000Z',
+          grants: {
+            can_publish_audio: true,
+            can_publish_video: false,
+            can_publish_screen: false,
+            can_subscribe: true,
+          },
+        },
+      }),
+    )
+    const client = createOpenCordApiClient({
+      baseUrl: 'https://chat.example.com',
+      fetch: fetchMock,
+      sessionToken: 'session-token',
+    })
+
+    await expect(
+      client.joinVoiceChannel('01973f83-f22a-73ba-ae76-5a045c52fc98', {
+        selfMute: false,
+        selfDeaf: false,
+      }),
+    ).resolves.toEqual({
+      voice: {
+        channelId: '01973f83-f22a-73ba-ae76-5a045c52fc98',
+        userId: '01973f83-f22a-73ba-ae76-5a045c52fc97',
+        selfMute: false,
+        selfDeaf: false,
+      },
+      media: {
+        provider: 'livekit',
+        serverUrl: 'ws://localhost:7880',
+        region: 'local',
+        roomType: 'voice_channel',
+        roomName: 'opencord_voice_01973f83f22a73baae765a045c52fc98',
+        organizationId: '01973f83-f22a-73ba-ae76-5a045c52fc96',
+        spaceId: '01973f83-f22a-73ba-ae76-5a045c52fc95',
+        channelId: '01973f83-f22a-73ba-ae76-5a045c52fc98',
+        participantIdentity: '01973f83-f22a-73ba-ae76-5a045c52fc97',
+        participantToken: 'livekit.jwt',
+        expiresAt: '2026-06-23T03:30:00.000Z',
+        grants: {
+          canPublishAudio: true,
+          canPublishVideo: false,
+          canPublishScreen: false,
+          canSubscribe: true,
+        },
+      },
+    })
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://chat.example.com/voice/channels/01973f83-f22a-73ba-ae76-5a045c52fc98/join',
+      {
+        body: JSON.stringify({
+          self_mute: false,
+          self_deaf: false,
+        }),
+        headers: {
+          Accept: 'application/json',
+          Authorization: 'Bearer session-token',
+          'Content-Type': 'application/json',
+        },
+        method: 'POST',
+      },
+    )
+  })
 })

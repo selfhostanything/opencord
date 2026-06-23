@@ -37,6 +37,45 @@ export type PushToken = {
   updatedAt: string
 }
 
+export type JoinVoiceChannelRequest = {
+  selfMute?: boolean
+  selfDeaf?: boolean
+}
+
+export type MediaTokenGrants = {
+  canPublishAudio: boolean
+  canPublishVideo: boolean
+  canPublishScreen: boolean
+  canSubscribe: boolean
+}
+
+export type MediaRoomToken = {
+  provider: string
+  serverUrl: string
+  region: string
+  roomType: string
+  roomName: string
+  organizationId: string
+  spaceId: string
+  channelId: string
+  participantIdentity: string
+  participantToken: string
+  expiresAt: string
+  grants: MediaTokenGrants
+}
+
+export type VoiceParticipant = {
+  channelId: string
+  userId: string
+  selfMute: boolean
+  selfDeaf: boolean
+}
+
+export type VoiceJoin = {
+  voice: VoiceParticipant
+  media: MediaRoomToken
+}
+
 export type OpenCordApiClientOptions = {
   baseUrl?: string
   fetch?: OpenCordFetch
@@ -74,6 +113,40 @@ type PushTokenResourcePayload = {
 
 type PushTokenListPayload = {
   push_tokens?: unknown
+}
+
+type MediaTokenGrantsPayload = {
+  can_publish_audio?: unknown
+  can_publish_video?: unknown
+  can_publish_screen?: unknown
+  can_subscribe?: unknown
+}
+
+type MediaRoomTokenPayload = {
+  provider?: unknown
+  server_url?: unknown
+  region?: unknown
+  room_type?: unknown
+  room_name?: unknown
+  organization_id?: unknown
+  space_id?: unknown
+  channel_id?: unknown
+  participant_identity?: unknown
+  participant_token?: unknown
+  expires_at?: unknown
+  grants?: unknown
+}
+
+type VoiceParticipantPayload = {
+  channel_id?: unknown
+  user_id?: unknown
+  self_mute?: unknown
+  self_deaf?: unknown
+}
+
+type VoiceJoinPayload = {
+  voice?: unknown
+  media?: unknown
 }
 
 type ErrorPayload = {
@@ -195,6 +268,27 @@ export class OpenCordApiClient {
     return payload.push_tokens.map(pushTokenFromPayload)
   }
 
+  async joinVoiceChannel(
+    channelId: string,
+    request: JoinVoiceChannelRequest = {},
+  ): Promise<VoiceJoin> {
+    const payload = await this.requestJson<VoiceJoinPayload>(
+      `/voice/channels/${encodeURIComponent(channelId)}/join`,
+      {
+        body: JSON.stringify({
+          self_mute: request.selfMute,
+          self_deaf: request.selfDeaf,
+        }),
+        method: 'POST',
+      },
+    )
+
+    return {
+      voice: voiceParticipantFromPayload(payload.voice),
+      media: mediaRoomTokenFromPayload(payload.media),
+    }
+  }
+
   private async requestJson<T>(path: string, init: RequestInit = {}): Promise<T> {
     const response = await this.fetchImpl(this.endpoint(path), {
       ...init,
@@ -264,12 +358,57 @@ function nullableStringValue(value: unknown) {
   return typeof value === 'string' ? value : null
 }
 
+function booleanValue(value: unknown, fallback: boolean) {
+  return typeof value === 'boolean' ? value : fallback
+}
+
 function pushPlatformValue(value: unknown): PushPlatform {
   if (value === 'ios' || value === 'android' || value === 'web' || value === 'desktop') {
     return value
   }
 
   return 'web'
+}
+
+function mediaTokenGrantsFromPayload(value: unknown): MediaTokenGrants {
+  const payload = objectValue(value) as MediaTokenGrantsPayload
+
+  return {
+    canPublishAudio: booleanValue(payload.can_publish_audio, false),
+    canPublishVideo: booleanValue(payload.can_publish_video, false),
+    canPublishScreen: booleanValue(payload.can_publish_screen, false),
+    canSubscribe: booleanValue(payload.can_subscribe, true),
+  }
+}
+
+function mediaRoomTokenFromPayload(value: unknown): MediaRoomToken {
+  const payload = objectValue(value) as MediaRoomTokenPayload
+
+  return {
+    provider: stringValue(payload.provider, 'livekit'),
+    serverUrl: stringValue(payload.server_url, ''),
+    region: stringValue(payload.region, 'local'),
+    roomType: stringValue(payload.room_type, 'voice_channel'),
+    roomName: stringValue(payload.room_name, ''),
+    organizationId: stringValue(payload.organization_id, ''),
+    spaceId: stringValue(payload.space_id, ''),
+    channelId: stringValue(payload.channel_id, ''),
+    participantIdentity: stringValue(payload.participant_identity, ''),
+    participantToken: stringValue(payload.participant_token, ''),
+    expiresAt: stringValue(payload.expires_at, ''),
+    grants: mediaTokenGrantsFromPayload(payload.grants),
+  }
+}
+
+function voiceParticipantFromPayload(value: unknown): VoiceParticipant {
+  const payload = objectValue(value) as VoiceParticipantPayload
+
+  return {
+    channelId: stringValue(payload.channel_id, ''),
+    userId: stringValue(payload.user_id, ''),
+    selfMute: booleanValue(payload.self_mute, false),
+    selfDeaf: booleanValue(payload.self_deaf, false),
+  }
 }
 
 function pushTokenFromPayload(value: unknown): PushToken {

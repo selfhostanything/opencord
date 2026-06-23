@@ -42,6 +42,23 @@ describe('OpenCord web chat UI', () => {
     })
   })
 
+  it('renders Discord-style rich embed cards in the message timeline', () => {
+    render(<App />)
+
+    const timeline = screen.getByLabelText('Message timeline')
+    const embed = within(timeline).getByRole('article', {
+      name: 'Rich embed: Deploy preview ready',
+    })
+
+    expect(embed).toHaveTextContent('Deploy preview ready')
+    expect(embed).toHaveTextContent('Webhook embed payloads now render in official clients.')
+    expect(embed).toHaveTextContent('Environment')
+    expect(embed).toHaveTextContent('production')
+    expect(embed).toHaveTextContent('Version')
+    expect(embed).toHaveTextContent('2026.06.24')
+    expect(embed).toHaveTextContent('Release Hook')
+  })
+
   it('sends, edits, and deletes a local message in the selected channel', async () => {
     render(<App />)
 

@@ -54,8 +54,40 @@ type ChatMessage = {
   time: string
   body: string
   own: boolean
+  embeds: RichEmbed[]
   attachments: MessageAttachment[]
   edited?: boolean
+}
+
+type RichEmbed = {
+  type?: 'rich'
+  title?: string
+  description?: string
+  url?: string
+  timestamp?: string
+  color?: number
+  author?: {
+    name: string
+    url?: string
+    icon_url?: string
+  }
+  footer?: {
+    text: string
+    icon_url?: string
+  }
+  image?: {
+    url: string
+  }
+  thumbnail?: {
+    url: string
+  }
+  fields?: RichEmbedField[]
+}
+
+type RichEmbedField = {
+  name: string
+  value: string
+  inline?: boolean
 }
 
 type MessageAttachment = {
@@ -226,6 +258,7 @@ const initialMessages: ChatMessage[] = [
     time: '09:14',
     body: 'Welcome to OpenCord. The first chat core is coming together: auth, spaces, channels, messages, permissions, and realtime.',
     own: false,
+    embeds: [],
     attachments: [],
   },
   {
@@ -236,6 +269,21 @@ const initialMessages: ChatMessage[] = [
     time: '09:22',
     body: 'The web client should feel familiar for Discord users but calmer for company work.',
     own: false,
+    embeds: [
+      {
+        type: 'rich',
+        title: 'Deploy preview ready',
+        description: 'Webhook embed payloads now render in official clients.',
+        url: 'https://opencord.local/deploys/2026.06.24',
+        color: 2644333,
+        fields: [
+          { name: 'Environment', value: 'production', inline: true },
+          { name: 'Version', value: '2026.06.24', inline: true },
+        ],
+        footer: { text: 'Release Hook' },
+        timestamp: '2026-06-24T09:22:00.000Z',
+      },
+    ],
     attachments: [],
   },
   {
@@ -246,6 +294,7 @@ const initialMessages: ChatMessage[] = [
     time: '09:31',
     body: 'I am wiring the Phase 01 shell so the backend work has a usable surface.',
     own: true,
+    embeds: [],
     attachments: [],
   },
   {
@@ -256,6 +305,7 @@ const initialMessages: ChatMessage[] = [
     time: '08:00',
     body: 'Channel permissions are enabled. Members can view announcements but cannot send messages here.',
     own: false,
+    embeds: [],
     attachments: [],
   },
 ]
@@ -868,6 +918,7 @@ export default function App() {
         time: 'now',
         body,
         own: true,
+        embeds: [],
         attachments: pendingAttachments,
       },
     ])
@@ -1315,7 +1366,8 @@ export default function App() {
                         <time>{message.time}</time>
                         {message.edited ? <em>edited</em> : null}
                       </header>
-                      <p>{message.body}</p>
+                      {message.body ? <p>{message.body}</p> : null}
+                      <RichEmbedList embeds={message.embeds} />
                       <AttachmentList attachments={message.attachments} />
                       {message.own ? (
                         <div className="message-actions">
@@ -2194,6 +2246,89 @@ function AttachmentList({ attachments }: { attachments: MessageAttachment[] }) {
   )
 }
 
+function RichEmbedList({ embeds }: { embeds: RichEmbed[] }) {
+  if (embeds.length === 0) {
+    return null
+  }
+
+  return (
+    <div className="message-embeds">
+      {embeds.map((embed, index) => (
+        <RichEmbedCard
+          key={`${embed.title ?? embed.description ?? 'embed'}-${index}`}
+          embed={embed}
+        />
+      ))}
+    </div>
+  )
+}
+
+function RichEmbedCard({ embed }: { embed: RichEmbed }) {
+  const label = richEmbedLabel(embed)
+
+  return (
+    <article
+      aria-label={`Rich embed: ${label}`}
+      className="message-embed-card"
+      style={{ borderLeftColor: richEmbedAccentColor(embed.color) }}
+    >
+      <div className="message-embed-main">
+        {embed.author?.name ? (
+          <div className="message-embed-author">
+            {embed.author.icon_url ? <img src={embed.author.icon_url} alt="" /> : null}
+            {embed.author.url ? (
+              <a href={embed.author.url} target="_blank" rel="noreferrer">
+                {embed.author.name}
+              </a>
+            ) : (
+              <span>{embed.author.name}</span>
+            )}
+          </div>
+        ) : null}
+        {embed.title ? (
+          embed.url ? (
+            <a className="message-embed-title" href={embed.url} target="_blank" rel="noreferrer">
+              {embed.title}
+            </a>
+          ) : (
+            <strong className="message-embed-title">{embed.title}</strong>
+          )
+        ) : null}
+        {embed.description ? (
+          <p className="message-embed-description">{embed.description}</p>
+        ) : null}
+        {embed.fields && embed.fields.length > 0 ? (
+          <dl className="message-embed-fields">
+            {embed.fields.map((field, index) => (
+              <div
+                key={`${field.name}-${index}`}
+                className={field.inline ? 'message-embed-field is-inline' : 'message-embed-field'}
+              >
+                <dt>{field.name}</dt>
+                <dd>{field.value}</dd>
+              </div>
+            ))}
+          </dl>
+        ) : null}
+        {embed.image?.url ? (
+          <img className="message-embed-image" src={embed.image.url} alt="" />
+        ) : null}
+        {embed.footer?.text || embed.timestamp ? (
+          <footer className="message-embed-footer">
+            {embed.footer?.icon_url ? <img src={embed.footer.icon_url} alt="" /> : null}
+            {embed.footer?.text ? <span>{embed.footer.text}</span> : null}
+            {embed.footer?.text && embed.timestamp ? <span aria-hidden="true">·</span> : null}
+            {embed.timestamp ? <time>{formatEmbedTimestamp(embed.timestamp)}</time> : null}
+          </footer>
+        ) : null}
+      </div>
+      {embed.thumbnail?.url ? (
+        <img className="message-embed-thumbnail" src={embed.thumbnail.url} alt="" />
+      ) : null}
+    </article>
+  )
+}
+
 function AttachmentSummary({ attachment }: { attachment: MessageAttachment }) {
   return (
     <div className="attachment-summary">
@@ -2301,6 +2436,31 @@ function formatBytes(sizeBytes: number) {
 
   const mib = kib / 1024
   return `${mib.toFixed(mib >= 10 ? 0 : 1)} MiB`
+}
+
+function richEmbedLabel(embed: RichEmbed) {
+  return embed.title ?? embed.author?.name ?? embed.description?.slice(0, 64) ?? 'Untitled'
+}
+
+function richEmbedAccentColor(color: number | undefined) {
+  if (typeof color !== 'number' || !Number.isFinite(color)) {
+    return '#4b5fc4'
+  }
+
+  const normalized = Math.max(0, Math.min(0xffffff, Math.trunc(color)))
+  return `#${normalized.toString(16).padStart(6, '0')}`
+}
+
+function formatEmbedTimestamp(value: string) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return value
+  }
+
+  return date.toLocaleString([], {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  })
 }
 
 function formatMeetingDay(value: string) {

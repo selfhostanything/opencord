@@ -39,8 +39,34 @@ export type MobileMessage = {
   channelId: string
   authorName: string
   content: string
+  embeds: MobileRichEmbed[]
   time: string
   own: boolean
+}
+
+export type MobileRichEmbed = {
+  type?: 'rich'
+  title?: string
+  description?: string
+  url?: string
+  timestamp?: string
+  color?: number
+  author?: {
+    name: string
+    url?: string
+    iconUrl?: string
+  }
+  footer?: {
+    text: string
+    iconUrl?: string
+  }
+  fields?: MobileRichEmbedField[]
+}
+
+export type MobileRichEmbedField = {
+  name: string
+  value: string
+  inline?: boolean
 }
 
 export type MobileVoiceParticipant = {
@@ -149,6 +175,19 @@ const initialMessages: MobileMessage[] = [
     channelId: 'general',
     authorName: 'Mira',
     content: 'Mobile shell is ready for login, channel navigation, and chat state.',
+    embeds: [
+      {
+        type: 'rich',
+        title: 'Deploy preview ready',
+        description: 'Webhook embed payloads now render in official clients.',
+        color: 2644333,
+        fields: [
+          { name: 'Environment', value: 'production', inline: true },
+          { name: 'Version', value: '2026.06.24', inline: true },
+        ],
+        footer: { text: 'Release Hook' },
+      },
+    ],
     time: '09:10',
     own: false,
   },
@@ -157,6 +196,7 @@ const initialMessages: MobileMessage[] = [
     channelId: 'backend',
     authorName: 'Thanet',
     content: 'Shared API and realtime packages are available to mobile now.',
+    embeds: [],
     time: '09:16',
     own: false,
   },
@@ -249,6 +289,7 @@ export function mobileReducer(state: MobileAppState, action: MobileAction): Mobi
             channelId: state.selectedChannelId,
             authorName: 'You',
             content,
+            embeds: [],
             time: 'now',
             own: true,
           },
@@ -511,8 +552,9 @@ function messageFromRealtimeEnvelope(envelope: RealtimeIncomingEnvelope): Mobile
   const data = objectValue(envelope.data)
   const message = objectValue(data.message)
   const channelId = stringValue(message.channel_id) ?? envelope.scope.channel_id
-  const content = stringValue(message.content)
-  if (!channelId || !content) {
+  const content = textValue(message.content)
+  const embeds = richEmbedsValue(message.embeds)
+  if (!channelId || (!content && embeds.length === 0)) {
     return null
   }
 
@@ -524,6 +566,7 @@ function messageFromRealtimeEnvelope(envelope: RealtimeIncomingEnvelope): Mobile
       stringValue(message.author_user_id) ??
       'Unknown user',
     content,
+    embeds,
     time: timeLabel(envelope.occurred_at),
     own: false,
   }
@@ -535,6 +578,111 @@ function objectValue(value: unknown): Record<string, unknown> {
 
 function stringValue(value: unknown) {
   return typeof value === 'string' && value.trim() ? value : undefined
+}
+
+function textValue(value: unknown) {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function numberValue(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+function booleanValue(value: unknown) {
+  return typeof value === 'boolean' ? value : undefined
+}
+
+function richEmbedsValue(value: unknown): MobileRichEmbed[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value.flatMap((candidate) => {
+    const embed = richEmbedValue(candidate)
+    return embed ? [embed] : []
+  })
+}
+
+function richEmbedValue(value: unknown): MobileRichEmbed | null {
+  const embed = objectValue(value)
+  const fields = richEmbedFieldsValue(embed.fields)
+  const footer = richEmbedFooterValue(embed.footer)
+  const author = richEmbedAuthorValue(embed.author)
+  const title = stringValue(embed.title)
+  const description = stringValue(embed.description)
+  const url = stringValue(embed.url)
+  const timestamp = stringValue(embed.timestamp)
+  const color = numberValue(embed.color)
+
+  if (!title && !description && fields.length === 0 && !footer && !author) {
+    return null
+  }
+
+  return {
+    type: 'rich',
+    ...(title ? { title } : {}),
+    ...(description ? { description } : {}),
+    ...(url ? { url } : {}),
+    ...(timestamp ? { timestamp } : {}),
+    ...(color !== undefined ? { color } : {}),
+    ...(author ? { author } : {}),
+    ...(footer ? { footer } : {}),
+    ...(fields.length > 0 ? { fields } : {}),
+  }
+}
+
+function richEmbedFieldsValue(value: unknown): MobileRichEmbedField[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value.flatMap((candidate) => {
+    const field = objectValue(candidate)
+    const name = stringValue(field.name)
+    const fieldValue = stringValue(field.value)
+    if (!name || !fieldValue) {
+      return []
+    }
+    const inline = booleanValue(field.inline)
+
+    return [
+      {
+        name,
+        value: fieldValue,
+        ...(inline !== undefined ? { inline } : {}),
+      },
+    ]
+  })
+}
+
+function richEmbedFooterValue(value: unknown): MobileRichEmbed['footer'] | undefined {
+  const footer = objectValue(value)
+  const text = stringValue(footer.text)
+  if (!text) {
+    return undefined
+  }
+  const iconUrl = stringValue(footer.icon_url)
+
+  return {
+    text,
+    ...(iconUrl ? { iconUrl } : {}),
+  }
+}
+
+function richEmbedAuthorValue(value: unknown): MobileRichEmbed['author'] | undefined {
+  const author = objectValue(value)
+  const name = stringValue(author.name)
+  if (!name) {
+    return undefined
+  }
+  const url = stringValue(author.url)
+  const iconUrl = stringValue(author.icon_url)
+
+  return {
+    name,
+    ...(url ? { url } : {}),
+    ...(iconUrl ? { iconUrl } : {}),
+  }
 }
 
 function timeLabel(value: string) {

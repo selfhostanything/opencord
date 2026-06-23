@@ -1207,6 +1207,128 @@ button {
   line-height: 1.5;
 }
 
+.message-embeds {
+  display: grid;
+  gap: 8px;
+  max-width: min(620px, 100%);
+  margin-top: 10px;
+}
+
+.message-embed-card {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  border: 1px solid #3a3a3a;
+  border-left: 4px solid #4b5fc4;
+  border-radius: 8px;
+  background: #202020;
+  padding: 12px;
+}
+
+.message-embed-main {
+  min-width: 0;
+  display: grid;
+  gap: 7px;
+}
+
+.message-embed-author {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #cfd6cc;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.message-embed-author img,
+.message-embed-footer img {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.message-embed-author a,
+.message-embed-title {
+  color: #86c5ff;
+  text-decoration: none;
+}
+
+.message-embed-title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.message-embed-description {
+  max-width: 100%;
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: #d8ddd5;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.message-embed-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px 12px;
+  margin: 2px 0 0;
+}
+
+.message-embed-field {
+  min-width: 0;
+  grid-column: 1 / -1;
+}
+
+.message-embed-field.is-inline {
+  grid-column: auto;
+}
+
+.message-embed-field dt {
+  overflow-wrap: anywhere;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.message-embed-field dd {
+  margin: 3px 0 0;
+  overflow-wrap: anywhere;
+  color: #cfd6cc;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.message-embed-image {
+  width: 100%;
+  max-height: 280px;
+  border-radius: 6px;
+  object-fit: cover;
+  background: #161616;
+}
+
+.message-embed-thumbnail {
+  width: 82px;
+  height: 82px;
+  border-radius: 6px;
+  object-fit: cover;
+  background: #161616;
+}
+
+.message-embed-footer {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  color: #9ea49b;
+  font-size: 12px;
+}
+
 .message-attachments {
   display: grid;
   gap: 8px;

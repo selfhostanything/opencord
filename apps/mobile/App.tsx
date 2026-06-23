@@ -20,6 +20,7 @@ import {
   selectedChannel,
   type MobileChannel,
   type MobileMessage,
+  type MobileRichEmbed,
   type MobileVoiceParticipant,
 } from './src/mobileState'
 
@@ -296,10 +297,66 @@ function MessageBubble({ message }: { message: MobileMessage }) {
   return (
     <View style={[styles.message, message.own ? styles.ownMessage : null]}>
       <Text style={styles.messageAuthor}>{message.authorName}</Text>
-      <Text style={styles.messageContent}>{message.content}</Text>
+      {message.content ? <Text style={styles.messageContent}>{message.content}</Text> : null}
+      <MobileRichEmbedList embeds={message.embeds} />
       <Text style={styles.messageTime}>{message.time}</Text>
     </View>
   )
+}
+
+function MobileRichEmbedList({ embeds }: { embeds: MobileRichEmbed[] }) {
+  if (embeds.length === 0) {
+    return null
+  }
+
+  return (
+    <View style={styles.embedList}>
+      {embeds.map((embed, index) => (
+        <MobileRichEmbedCard
+          key={`${embed.title ?? embed.description ?? 'embed'}-${index}`}
+          embed={embed}
+        />
+      ))}
+    </View>
+  )
+}
+
+function MobileRichEmbedCard({ embed }: { embed: MobileRichEmbed }) {
+  return (
+    <View
+      accessibilityLabel={`Rich embed: ${mobileRichEmbedLabel(embed)}`}
+      accessible
+      style={[styles.embedCard, { borderLeftColor: mobileRichEmbedAccentColor(embed.color) }]}
+    >
+      {embed.author?.name ? <Text style={styles.embedAuthor}>{embed.author.name}</Text> : null}
+      {embed.title ? <Text style={styles.embedTitle}>{embed.title}</Text> : null}
+      {embed.description ? <Text style={styles.embedDescription}>{embed.description}</Text> : null}
+      {embed.fields && embed.fields.length > 0 ? (
+        <View style={styles.embedFields}>
+          {embed.fields.map((field, index) => (
+            <View key={`${field.name}-${index}`} style={styles.embedField}>
+              <Text style={styles.embedFieldName}>{field.name}</Text>
+              <Text style={styles.embedFieldValue}>{field.value}</Text>
+            </View>
+          ))}
+        </View>
+      ) : null}
+      {embed.footer?.text ? <Text style={styles.embedFooter}>{embed.footer.text}</Text> : null}
+    </View>
+  )
+}
+
+function mobileRichEmbedLabel(embed: MobileRichEmbed) {
+  return embed.title ?? embed.author?.name ?? embed.description?.slice(0, 64) ?? 'Untitled'
+}
+
+function mobileRichEmbedAccentColor(color: number | undefined) {
+  if (typeof color !== 'number' || !Number.isFinite(color)) {
+    return '#4b5fc4'
+  }
+
+  const normalized = Math.max(0, Math.min(0xffffff, Math.trunc(color)))
+  return `#${normalized.toString(16).padStart(6, '0')}`
 }
 
 const styles = StyleSheet.create({
@@ -492,6 +549,60 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 21,
     marginTop: 4,
+  },
+  embedList: {
+    gap: 8,
+    marginTop: 8,
+  },
+  embedCard: {
+    backgroundColor: '#1a1a1a',
+    borderColor: '#343a37',
+    borderLeftWidth: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: 6,
+    maxWidth: 320,
+    minWidth: 0,
+    padding: 10,
+  },
+  embedAuthor: {
+    color: '#cfd6cc',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  embedTitle: {
+    color: '#86c5ff',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  embedDescription: {
+    color: '#d8ddd5',
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  embedFields: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  embedField: {
+    minWidth: 128,
+  },
+  embedFieldName: {
+    color: '#ffffff',
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  embedFieldValue: {
+    color: '#cfd6cc',
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 2,
+  },
+  embedFooter: {
+    color: '#9ea49b',
+    fontSize: 11,
+    marginTop: 2,
   },
   messageTime: {
     color: '#aab2a8',

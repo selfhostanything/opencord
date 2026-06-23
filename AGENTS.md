@@ -10,6 +10,12 @@ Rules for agents working in `opencord-clients`.
   other hash-style references unless a human explicitly approves a narrow
   exception.
 - Use TDD for behavior changes.
+- Prefer larger coherent checkpoints over tiny commits. Keep test-first
+  red/green iterations local, batch related UI/API/client behavior, run local
+  validation first, then commit and push once for the batch.
+- Do not use CI as the inner development loop. Push after local tests, lint,
+  build, and browser/mobile validation have already passed or after documenting
+  a real local blocker.
 - Keep the official clients Apache-2.0 licensed.
 - The official web client must be able to connect to any compatible OpenCord server URL.
 - Do not implement Phase 01 chat, media, meeting, or bot features in Phase 00.

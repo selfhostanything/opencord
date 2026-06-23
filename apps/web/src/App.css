@@ -186,6 +186,7 @@ button {
 .server-form label,
 .channel-form label,
 .edit-bar label,
+.developer-form label,
 .meeting-dialog label {
   display: block;
   margin-bottom: 7px;
@@ -204,6 +205,8 @@ button {
 .server-form input,
 .channel-form input,
 .edit-bar input,
+.developer-form input,
+.developer-form textarea,
 .meeting-dialog input,
 .composer textarea {
   width: 100%;
@@ -217,6 +220,8 @@ button {
 .server-form input,
 .channel-form input,
 .edit-bar input,
+.developer-form input,
+.developer-form textarea,
 .meeting-dialog input {
   min-height: 36px;
   padding: 8px 10px;
@@ -240,6 +245,8 @@ button {
 .voice-join-button,
 .voice-control-buttons button,
 .calendar-toolbar button,
+.developer-form button,
+.developer-bot-actions button,
 .meeting-dialog-actions button,
 .meeting-card-actions button,
 .meeting-room-controls button {
@@ -629,6 +636,161 @@ button {
 
 .header-actions button[aria-pressed="true"] {
   background: #28796d;
+}
+
+.developer-panel {
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  align-content: start;
+  gap: 16px;
+  padding: 20px;
+}
+
+.developer-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.developer-toolbar h2 {
+  margin: 0;
+  color: #ffffff;
+  font-size: 20px;
+  line-height: 1.2;
+}
+
+.developer-toolbar p {
+  margin: 4px 0 0;
+  color: #9ea49b;
+  font-size: 13px;
+}
+
+.developer-form {
+  display: grid;
+  grid-template-columns: minmax(160px, 0.8fr) minmax(220px, 1.4fr) auto;
+  align-items: end;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #3a3a3a;
+  border-radius: 8px;
+  background: #202020;
+}
+
+.developer-form textarea {
+  resize: vertical;
+}
+
+.developer-form button {
+  min-height: 36px;
+  padding: 0 12px;
+}
+
+.developer-form button:disabled,
+.developer-bot-actions button:disabled {
+  cursor: not-allowed;
+  color: #6d746b;
+  background: #252525;
+}
+
+.developer-bot-list {
+  display: grid;
+  gap: 12px;
+}
+
+.developer-bot-card {
+  min-width: 0;
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #3a3a3a;
+  border-radius: 8px;
+  background: #202020;
+}
+
+.developer-bot-card header {
+  min-width: 0;
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.developer-bot-card h3 {
+  margin: 0;
+  color: #ffffff;
+  font-size: 16px;
+  line-height: 1.2;
+}
+
+.developer-bot-card p {
+  margin: 5px 0 0;
+  color: #c8cdc5;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.developer-bot-card header span {
+  flex: 0 0 auto;
+  padding: 6px 8px;
+  border: 1px solid #3a3a3a;
+  border-radius: 6px;
+  color: #aeb5ac;
+  background: #171717;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.developer-token-row {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.developer-token-row strong,
+.developer-endpoints strong {
+  color: #aeb5ac;
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.developer-token-row code,
+.developer-endpoints code {
+  overflow-wrap: anywhere;
+  padding: 8px 10px;
+  border-radius: 6px;
+  color: #dbece5;
+  background: #17221f;
+  font-size: 12px;
+}
+
+.developer-endpoints {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.developer-endpoints div {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.developer-bot-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.developer-bot-actions button {
+  min-height: 34px;
+  padding: 0 12px;
+  background: #343434;
+}
+
+.developer-bot-actions button:first-child {
+  background: #4b5fc4;
 }
 
 .calendar-panel {
@@ -1343,17 +1505,22 @@ button {
     flex-wrap: wrap;
   }
 
-  .calendar-toolbar {
+  .calendar-toolbar,
+  .developer-toolbar,
+  .developer-bot-card header {
     align-items: stretch;
     flex-direction: column;
   }
 
-  .calendar-toolbar button {
+  .calendar-toolbar button,
+  .developer-form button {
     width: 100%;
   }
 
   .meeting-card,
   .meeting-form-grid,
+  .developer-form,
+  .developer-endpoints,
   .meeting-room-grid,
   .meeting-room-controls {
     grid-template-columns: 1fr;

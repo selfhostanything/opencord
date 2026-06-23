@@ -92,7 +92,15 @@ type ScreenShareState =
   | { status: 'sharing'; stream: MediaStream }
   | { status: 'error'; message: string }
 
-type ActivePanel = 'chat' | 'calendar' | 'meeting'
+type ActivePanel = 'chat' | 'calendar' | 'developers' | 'meeting'
+
+type DeveloperBot = {
+  id: string
+  name: string
+  description: string
+  token: string
+  invitedSpaceIds: string[]
+}
 
 type CalendarMeeting = {
   id: string
@@ -310,6 +318,9 @@ export default function App() {
   const [newMeetingStartsAt, setNewMeetingStartsAt] = useState('2026-06-25T10:00')
   const [newMeetingEndsAt, setNewMeetingEndsAt] = useState('2026-06-25T10:30')
   const [meetingRoom, setMeetingRoom] = useState<MeetingRoomState | null>(null)
+  const [developerBots, setDeveloperBots] = useState<DeveloperBot[]>([])
+  const [newBotName, setNewBotName] = useState('')
+  const [newBotDescription, setNewBotDescription] = useState('')
 
   const selectedSpace = spaces.find((space) => space.id === selectedSpaceId) ?? spaces[0]
   const visibleChannels = channels.filter((channel) => channel.spaceId === selectedSpace.id)
@@ -401,6 +412,52 @@ export default function App() {
 
   function showCalendarPanel() {
     setActivePanel('calendar')
+  }
+
+  function showDeveloperPanel() {
+    setMeetingRoom(null)
+    setActivePanel('developers')
+  }
+
+  function createDeveloperBot(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const name = newBotName.trim()
+    if (!name) {
+      return
+    }
+
+    setDeveloperBots((current) => [
+      ...current,
+      {
+        id: createLocalBotId(name),
+        name,
+        description: newBotDescription.trim() || 'No description',
+        token: createLocalBotToken(),
+        invitedSpaceIds: [],
+      },
+    ])
+    setNewBotName('')
+    setNewBotDescription('')
+  }
+
+  function rotateDeveloperBotToken(botId: string) {
+    setDeveloperBots((current) =>
+      current.map((bot) =>
+        bot.id === botId ? { ...bot, token: createLocalBotToken() } : bot,
+      ),
+    )
+  }
+
+  function inviteDeveloperBotToCurrentSpace(botId: string) {
+    setDeveloperBots((current) =>
+      current.map((bot) => {
+        if (bot.id !== botId || bot.invitedSpaceIds.includes(selectedSpace.id)) {
+          return bot
+        }
+
+        return { ...bot, invitedSpaceIds: [...bot.invitedSpaceIds, selectedSpace.id] }
+      }),
+    )
   }
 
   function addChannel(event: FormEvent<HTMLFormElement>) {
@@ -888,13 +945,33 @@ export default function App() {
             >
               Calendar
             </button>
+            <button
+              type="button"
+              aria-pressed={activePanel === 'developers'}
+              onClick={showDeveloperPanel}
+            >
+              Developer
+            </button>
             <button type="button" aria-label="Toggle members">
               Panel
             </button>
           </div>
         </header>
 
-        {activePanel === 'calendar' ? (
+        {activePanel === 'developers' ? (
+          <DeveloperSettingsPanel
+            activeConnection={activeConnection}
+            bots={developerBots}
+            newBotDescription={newBotDescription}
+            newBotName={newBotName}
+            selectedSpace={selectedSpace}
+            onCreateBot={createDeveloperBot}
+            onInviteBot={inviteDeveloperBotToCurrentSpace}
+            onNewBotDescriptionChange={setNewBotDescription}
+            onNewBotNameChange={setNewBotName}
+            onRotateToken={rotateDeveloperBotToken}
+          />
+        ) : activePanel === 'calendar' ? (
           <CalendarPanel
             channels={channels}
             meetings={meetings}
@@ -1065,6 +1142,131 @@ export default function App() {
         ))}
       </aside>
     </main>
+  )
+}
+
+function DeveloperSettingsPanel({
+  activeConnection,
+  bots,
+  newBotDescription,
+  newBotName,
+  selectedSpace,
+  onCreateBot,
+  onInviteBot,
+  onNewBotDescriptionChange,
+  onNewBotNameChange,
+  onRotateToken,
+}: {
+  activeConnection: ServerConnection
+  bots: DeveloperBot[]
+  newBotDescription: string
+  newBotName: string
+  selectedSpace: Space
+  onCreateBot: (event: FormEvent<HTMLFormElement>) => void
+  onInviteBot: (botId: string) => void
+  onNewBotDescriptionChange: (value: string) => void
+  onNewBotNameChange: (value: string) => void
+  onRotateToken: (botId: string) => void
+}) {
+  const serverBaseURL = activeConnection.baseUrl.replace(/\/+$/g, '')
+  const botCountText = `${bots.length} bot ${
+    bots.length === 1 ? 'application' : 'applications'
+  }`
+
+  return (
+    <section className="developer-panel" aria-label="Developer settings">
+      <div className="developer-toolbar">
+        <div>
+          <h2>Developer settings</h2>
+          <p>{botCountText}</p>
+        </div>
+      </div>
+
+      <form className="developer-form" onSubmit={onCreateBot}>
+        <div>
+          <label htmlFor="bot-application-name">Bot application name</label>
+          <input
+            id="bot-application-name"
+            value={newBotName}
+            onChange={(event) => onNewBotNameChange(event.target.value)}
+          />
+        </div>
+        <div>
+          <label htmlFor="bot-application-description">Bot application description</label>
+          <textarea
+            id="bot-application-description"
+            rows={3}
+            value={newBotDescription}
+            onChange={(event) => onNewBotDescriptionChange(event.target.value)}
+          />
+        </div>
+        <button type="submit" disabled={!newBotName.trim()}>
+          Create bot application
+        </button>
+      </form>
+
+      <section className="developer-bot-list" aria-label="Bot applications">
+        {bots.length === 0 ? (
+          <div className="empty-state">No bot applications yet.</div>
+        ) : (
+          bots.map((bot) => {
+            const isInvited = bot.invitedSpaceIds.includes(selectedSpace.id)
+
+            return (
+              <article key={bot.id} className="developer-bot-card">
+                <header>
+                  <div>
+                    <h3>{bot.name}</h3>
+                    <p>{bot.description}</p>
+                  </div>
+                  <span>{isInvited ? `Invited to ${selectedSpace.name}` : 'Not invited'}</span>
+                </header>
+
+                <div className="developer-token-row">
+                  <strong>Shown-once token</strong>
+                  <code aria-label="Shown-once bot token">{bot.token}</code>
+                </div>
+
+                <div className="developer-endpoints">
+                  <div>
+                    <strong>Server</strong>
+                    <code>{serverBaseURL}</code>
+                  </div>
+                  <div>
+                    <strong>REST</strong>
+                    <code>/api/compat/discord/v10</code>
+                  </div>
+                  <div>
+                    <strong>Gateway</strong>
+                    <code>/api/compat/discord/gateway</code>
+                  </div>
+                </div>
+
+                <div className="developer-bot-actions">
+                  <button
+                    type="button"
+                    aria-label={`Rotate token for ${bot.name}`}
+                    onClick={() => onRotateToken(bot.id)}
+                  >
+                    Rotate token
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`Invite ${bot.name} to ${selectedSpace.name}`}
+                    disabled={isInvited}
+                    onClick={() => onInviteBot(bot.id)}
+                  >
+                    {isInvited
+                      ? `Invited to ${selectedSpace.name}`
+                      : `Invite to ${selectedSpace.name}`}
+                  </button>
+                </div>
+              </article>
+            )
+          })
+        )}
+      </section>
+    </section>
   )
 }
 
@@ -1724,6 +1926,30 @@ function normalizeChannelName(name: string) {
 
 function slugForMeetingTitle(title: string) {
   return normalizeChannelName(title) || 'meeting'
+}
+
+let localBotTokenCounter = 0
+
+function createLocalBotId(name: string) {
+  return `local-bot-${Date.now()}-${slugForMeetingTitle(name)}`
+}
+
+function createLocalBotToken() {
+  localBotTokenCounter += 1
+  const bytes = new Uint8Array(18)
+  const cryptoApi = globalThis.crypto
+  if (cryptoApi?.getRandomValues) {
+    cryptoApi.getRandomValues(bytes)
+  } else {
+    const fallback = `${Date.now()}-${Math.random()}-${localBotTokenCounter}`
+    for (let index = 0; index < bytes.length; index += 1) {
+      bytes[index] = fallback.charCodeAt(index % fallback.length) % 256
+    }
+  }
+
+  const randomHex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
+  const counterSuffix = localBotTokenCounter.toString(36).padStart(4, '0')
+  return `ocb_${randomHex}${counterSuffix}`
 }
 
 function displayChannelName(name: string) {

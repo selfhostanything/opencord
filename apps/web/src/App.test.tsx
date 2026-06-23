@@ -153,6 +153,55 @@ describe('OpenCord web chat UI', () => {
     )
   })
 
+  it('creates, rotates, and invites a bot from developer settings', async () => {
+    render(<App />)
+
+    await userEvent.click(screen.getByRole('button', { name: 'Developer' }))
+
+    const developerSettings = screen.getByRole('region', { name: 'Developer settings' })
+    expect(
+      within(developerSettings).getByRole('heading', { name: 'Developer settings' }),
+    ).toBeInTheDocument()
+    expect(developerSettings).toHaveTextContent('0 bot applications')
+
+    await userEvent.type(
+      within(developerSettings).getByLabelText('Bot application name'),
+      'Deploy Bot',
+    )
+    await userEvent.type(
+      within(developerSettings).getByLabelText('Bot application description'),
+      'Posts release status into operations channels',
+    )
+    await userEvent.click(
+      within(developerSettings).getByRole('button', { name: 'Create bot application' }),
+    )
+
+    expect(developerSettings).toHaveTextContent('Deploy Bot')
+    expect(developerSettings).toHaveTextContent('Posts release status into operations channels')
+    const initialToken = within(developerSettings).getByLabelText('Shown-once bot token').textContent
+    expect(initialToken).toMatch(/^ocb_/)
+    expect(developerSettings).toHaveTextContent('/api/compat/discord/v10')
+    expect(developerSettings).toHaveTextContent('/api/compat/discord/gateway')
+
+    await userEvent.click(
+      within(developerSettings).getByRole('button', {
+        name: 'Rotate token for Deploy Bot',
+      }),
+    )
+
+    const rotatedToken = within(developerSettings).getByLabelText('Shown-once bot token').textContent
+    expect(rotatedToken).toMatch(/^ocb_/)
+    expect(rotatedToken).not.toBe(initialToken)
+
+    await userEvent.click(
+      within(developerSettings).getByRole('button', {
+        name: 'Invite Deploy Bot to OpenCord',
+      }),
+    )
+
+    expect(developerSettings).toHaveTextContent('Invited to OpenCord')
+  })
+
   it('opens and leaves a meeting room from the calendar', async () => {
     render(<App />)
 

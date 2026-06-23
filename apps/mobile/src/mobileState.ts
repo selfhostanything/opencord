@@ -1,4 +1,10 @@
-import { DEFAULT_OPENCORD_SERVER_URL, normalizeOpenCordBaseUrl } from '@opencord/api-client'
+import {
+  DEFAULT_OPENCORD_SERVER_URL,
+  normalizeOpenCordBaseUrl,
+  type PushPlatform,
+  type PushToken,
+  type RegisterPushTokenRequest,
+} from '@opencord/api-client'
 import {
   INITIAL_REALTIME_STATUS,
   type RealtimeConnectionStatus,
@@ -28,6 +34,16 @@ export type MobileMessage = {
   own: boolean
 }
 
+export type MobilePushRegistration =
+  | { status: 'idle' }
+  | {
+      status: 'registered'
+      platform: PushPlatform
+      tokenLastFour: string
+      deviceName: string | null
+    }
+  | { status: 'failed'; message: string }
+
 export type MobileAppState = {
   screen: MobileScreen
   serverUrl: string
@@ -36,6 +52,7 @@ export type MobileAppState = {
   selectedChannelId: string
   messages: MobileMessage[]
   realtimeStatus: RealtimeConnectionStatus
+  pushRegistration: MobilePushRegistration
 }
 
 export type MobileAction =
@@ -45,6 +62,8 @@ export type MobileAction =
   | { type: 'channel.back' }
   | { type: 'message.send'; content: string }
   | { type: 'realtime.message_created'; envelope: RealtimeIncomingEnvelope }
+  | { type: 'push.registered'; pushToken: PushToken }
+  | { type: 'push.failed'; message: string }
 
 const initialChannels: MobileChannel[] = [
   {
@@ -95,6 +114,7 @@ export function createInitialMobileState(): MobileAppState {
     selectedChannelId: initialChannels[0].id,
     messages: initialMessages,
     realtimeStatus: INITIAL_REALTIME_STATUS,
+    pushRegistration: { status: 'idle' },
   }
 }
 
@@ -174,6 +194,36 @@ export function mobileReducer(state: MobileAppState, action: MobileAction): Mobi
         ),
       }
     }
+    case 'push.registered':
+      return {
+        ...state,
+        pushRegistration: {
+          status: 'registered',
+          platform: action.pushToken.platform,
+          tokenLastFour: action.pushToken.tokenLastFour,
+          deviceName: action.pushToken.deviceName,
+        },
+      }
+    case 'push.failed':
+      return {
+        ...state,
+        pushRegistration: {
+          status: 'failed',
+          message: action.message,
+        },
+      }
+  }
+}
+
+export function mobilePushTokenRequest(
+  token: string,
+  platform: PushPlatform,
+  deviceName?: string,
+): RegisterPushTokenRequest {
+  return {
+    platform,
+    token,
+    deviceName,
   }
 }
 

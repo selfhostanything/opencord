@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { createInitialMobileState, mobileReducer } from './mobileState'
+import { createInitialMobileState, mobileReducer, mobilePushTokenRequest } from './mobileState'
 
 describe('mobile app state', () => {
   it('starts on the login screen with default OpenCord server data', () => {
@@ -122,5 +122,52 @@ describe('mobile app state', () => {
 
     expect(state.messages.at(-1)?.content).toBe('Watching logs now')
     expect(state.channels.find((channel) => channel.id === 'backend')?.unread).toBe(false)
+  })
+
+  it('builds mobile push token registration payloads for the shared API client', () => {
+    expect(
+      mobilePushTokenRequest('ExponentPushToken[abcdefghijklmnopqrstuvwxyz123456]', 'ios', 'Ada iPhone'),
+    ).toEqual({
+      platform: 'ios',
+      token: 'ExponentPushToken[abcdefghijklmnopqrstuvwxyz123456]',
+      deviceName: 'Ada iPhone',
+    })
+  })
+
+  it('tracks push token registration state without retaining the raw device token', () => {
+    const state = mobileReducer(createInitialMobileState(), {
+      type: 'push.registered',
+      pushToken: {
+        id: '01973f83-f22a-73ba-ae76-5a045c52fc96',
+        userId: '01973f83-f22a-73ba-ae76-5a045c52fc97',
+        platform: 'ios',
+        tokenLastFour: '456]',
+        deviceName: 'Ada iPhone',
+        createdAt: '2026-06-23T02:00:00.000Z',
+        updatedAt: '2026-06-23T02:00:00.000Z',
+      },
+    })
+
+    expect(state.pushRegistration).toEqual({
+      status: 'registered',
+      platform: 'ios',
+      tokenLastFour: '456]',
+      deviceName: 'Ada iPhone',
+    })
+    expect(JSON.stringify(state.pushRegistration)).not.toContain(
+      'ExponentPushToken[abcdefghijklmnopqrstuvwxyz123456]',
+    )
+  })
+
+  it('tracks push registration failures for mobile UI retry states', () => {
+    const state = mobileReducer(createInitialMobileState(), {
+      type: 'push.failed',
+      message: 'notification permission denied',
+    })
+
+    expect(state.pushRegistration).toEqual({
+      status: 'failed',
+      message: 'notification permission denied',
+    })
   })
 })

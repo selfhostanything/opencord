@@ -24,7 +24,7 @@ pnpm install
 
 ## Packages
 
-- `packages/api-client`: REST API client and generated SDK boundary.
+- `packages/api-client`: REST API client, push token methods, and generated SDK boundary.
 - `packages/realtime`: realtime gateway client boundary.
 - `packages/media`: media integration client boundary.
 - `packages/types`: shared TypeScript types.

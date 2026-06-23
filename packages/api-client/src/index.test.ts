@@ -105,7 +105,9 @@ describe('OpenCord API client', () => {
 
   it('throws typed API errors for non-health JSON endpoints', async () => {
     const client = createOpenCordApiClient({
-      fetch: vi.fn().mockResolvedValue(jsonResponse({ error: { message: 'missing' } }, { status: 404 })),
+      fetch: vi
+        .fn()
+        .mockResolvedValue(jsonResponse({ error: { message: 'missing' } }, { status: 404 })),
     })
 
     const error = await client.version().catch((caught: unknown) => caught)
@@ -113,5 +115,97 @@ describe('OpenCord API client', () => {
     expect(error).toBeInstanceOf(OpenCordApiError)
     expect(error).toMatchObject({ status: 404 })
     expect(error).toHaveProperty('message', 'missing')
+  })
+
+  it('registers push tokens with bearer auth and maps masked responses', async () => {
+    const fetchMock = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>()
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        push_token: {
+          id: '01973f83-f22a-73ba-ae76-5a045c52fc96',
+          user_id: '01973f83-f22a-73ba-ae76-5a045c52fc97',
+          platform: 'ios',
+          token_last_four: '456]',
+          device_name: 'Ada iPhone',
+          created_at: '2026-06-23T02:00:00.000Z',
+          updated_at: '2026-06-23T02:00:00.000Z',
+        },
+      }),
+    )
+    const client = createOpenCordApiClient({
+      baseUrl: 'https://chat.example.com',
+      fetch: fetchMock,
+      sessionToken: 'session-token',
+    })
+
+    await expect(
+      client.registerPushToken({
+        platform: 'ios',
+        token: 'ExponentPushToken[abcdefghijklmnopqrstuvwxyz123456]',
+        deviceName: 'Ada iPhone',
+      }),
+    ).resolves.toEqual({
+      id: '01973f83-f22a-73ba-ae76-5a045c52fc96',
+      userId: '01973f83-f22a-73ba-ae76-5a045c52fc97',
+      platform: 'ios',
+      tokenLastFour: '456]',
+      deviceName: 'Ada iPhone',
+      createdAt: '2026-06-23T02:00:00.000Z',
+      updatedAt: '2026-06-23T02:00:00.000Z',
+    })
+    expect(fetchMock).toHaveBeenCalledWith('https://chat.example.com/push-tokens', {
+      body: JSON.stringify({
+        platform: 'ios',
+        token: 'ExponentPushToken[abcdefghijklmnopqrstuvwxyz123456]',
+        device_name: 'Ada iPhone',
+      }),
+      headers: {
+        Accept: 'application/json',
+        Authorization: 'Bearer session-token',
+        'Content-Type': 'application/json',
+      },
+      method: 'POST',
+    })
+  })
+
+  it('lists current user push tokens through the typed API', async () => {
+    const fetchMock = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>()
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        push_tokens: [
+          {
+            id: '01973f83-f22a-73ba-ae76-5a045c52fc96',
+            user_id: '01973f83-f22a-73ba-ae76-5a045c52fc97',
+            platform: 'android',
+            token_last_four: '7890',
+            device_name: null,
+            created_at: '2026-06-23T02:00:00.000Z',
+            updated_at: '2026-06-23T02:00:00.000Z',
+          },
+        ],
+      }),
+    )
+    const client = createOpenCordApiClient({
+      fetch: fetchMock,
+      sessionToken: 'session-token',
+    })
+
+    await expect(client.listPushTokens()).resolves.toEqual([
+      {
+        id: '01973f83-f22a-73ba-ae76-5a045c52fc96',
+        userId: '01973f83-f22a-73ba-ae76-5a045c52fc97',
+        platform: 'android',
+        tokenLastFour: '7890',
+        deviceName: null,
+        createdAt: '2026-06-23T02:00:00.000Z',
+        updatedAt: '2026-06-23T02:00:00.000Z',
+      },
+    ])
+    expect(fetchMock).toHaveBeenCalledWith('http://localhost:8080/push-tokens', {
+      headers: {
+        Accept: 'application/json',
+        Authorization: 'Bearer session-token',
+      },
+    })
   })
 })

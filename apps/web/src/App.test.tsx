@@ -153,6 +153,38 @@ describe('OpenCord web chat UI', () => {
     )
   })
 
+  it('opens and leaves a meeting room from the calendar', async () => {
+    render(<App />)
+
+    await userEvent.click(screen.getByRole('button', { name: 'Calendar' }))
+
+    const upcomingMeetings = screen.getByLabelText('Upcoming meetings')
+    const roadmapMeeting = within(upcomingMeetings).getByText('Roadmap Review').closest('article')
+    expect(roadmapMeeting).not.toBeNull()
+
+    await userEvent.click(
+      within(roadmapMeeting!).getByRole('button', { name: 'Join meeting Roadmap Review' }),
+    )
+
+    const meetingRoom = screen.getByRole('region', { name: 'Meeting room' })
+    expect(meetingRoom).toHaveTextContent('Roadmap Review')
+    expect(meetingRoom).toHaveTextContent('Media room connected')
+    expect(meetingRoom).toHaveTextContent('http://localhost:8080/join/mtg-roadmap-review')
+    expect(within(meetingRoom).getByLabelText('You connected')).toBeInTheDocument()
+    expect(within(meetingRoom).getByLabelText('Mira connected')).toBeInTheDocument()
+
+    await userEvent.click(within(meetingRoom).getByRole('button', { name: 'Mute meeting microphone' }))
+    expect(within(meetingRoom).getByRole('button', { name: 'Unmute meeting microphone' })).toBeInTheDocument()
+
+    await userEvent.click(within(meetingRoom).getByRole('button', { name: 'Turn camera off' }))
+    expect(within(meetingRoom).getByRole('button', { name: 'Turn camera on' })).toBeInTheDocument()
+
+    await userEvent.click(within(meetingRoom).getByRole('button', { name: 'Leave meeting' }))
+
+    expect(screen.queryByRole('region', { name: 'Meeting room' })).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Calendar' })).toBeInTheDocument()
+  })
+
   it('shows voice channels with connected users and local controls', async () => {
     render(<App />)
 

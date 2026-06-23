@@ -92,7 +92,7 @@ type ScreenShareState =
   | { status: 'sharing'; stream: MediaStream }
   | { status: 'error'; message: string }
 
-type ActivePanel = 'chat' | 'calendar'
+type ActivePanel = 'chat' | 'calendar' | 'meeting'
 
 type CalendarMeeting = {
   id: string
@@ -103,6 +103,20 @@ type CalendarMeeting = {
   organizer: string
   joinUrl: string
   status: 'scheduled' | 'cancelled'
+}
+
+type MeetingRoomParticipant = {
+  id: string
+  name: string
+  role: string
+  self?: boolean
+}
+
+type MeetingRoomState = {
+  meeting: CalendarMeeting
+  selfMute: boolean
+  cameraOff: boolean
+  participants: MeetingRoomParticipant[]
 }
 
 const initialSpaces: Space[] = [
@@ -295,6 +309,7 @@ export default function App() {
   const [newMeetingTitle, setNewMeetingTitle] = useState('')
   const [newMeetingStartsAt, setNewMeetingStartsAt] = useState('2026-06-25T10:00')
   const [newMeetingEndsAt, setNewMeetingEndsAt] = useState('2026-06-25T10:30')
+  const [meetingRoom, setMeetingRoom] = useState<MeetingRoomState | null>(null)
 
   const selectedSpace = spaces.find((space) => space.id === selectedSpaceId) ?? spaces[0]
   const visibleChannels = channels.filter((channel) => channel.spaceId === selectedSpace.id)
@@ -368,13 +383,24 @@ export default function App() {
     if (firstChannel) {
       setSelectedChannelId(firstChannel.id)
       setPendingAttachments([])
+      setMeetingRoom(null)
       setActivePanel('chat')
     }
   }
 
   function selectTextChannel(channelId: string) {
     setSelectedChannelId(channelId)
+    setMeetingRoom(null)
     setActivePanel('chat')
+  }
+
+  function showChatPanel() {
+    setMeetingRoom(null)
+    setActivePanel('chat')
+  }
+
+  function showCalendarPanel() {
+    setActivePanel('calendar')
   }
 
   function addChannel(event: FormEvent<HTMLFormElement>) {
@@ -440,6 +466,51 @@ export default function App() {
     setNewMeetingStartsAt('2026-06-25T10:00')
     setNewMeetingEndsAt('2026-06-25T10:30')
     setShowMeetingForm(false)
+  }
+
+  function joinMeetingRoom(meeting: CalendarMeeting) {
+    const participants: MeetingRoomParticipant[] = [
+      { id: 'self', name: 'You', role: 'You', self: true },
+    ]
+    if (meeting.organizer !== 'You') {
+      participants.push({
+        id: `organizer-${meeting.organizer}`,
+        name: meeting.organizer,
+        role: 'Organizer',
+      })
+    }
+
+    setMeetingRoom({
+      meeting,
+      selfMute: false,
+      cameraOff: false,
+      participants,
+    })
+    setActivePanel('meeting')
+  }
+
+  function leaveMeetingRoom() {
+    setScreenShareState((current) => {
+      if (current.status === 'sharing') {
+        stopScreenShareTracks(current.stream)
+      }
+
+      return { status: 'idle' }
+    })
+    setMeetingRoom(null)
+    setActivePanel('calendar')
+  }
+
+  function toggleMeetingMute() {
+    setMeetingRoom((current) =>
+      current ? { ...current, selfMute: !current.selfMute } : current,
+    )
+  }
+
+  function toggleMeetingCamera() {
+    setMeetingRoom((current) =>
+      current ? { ...current, cameraOff: !current.cameraOff } : current,
+    )
   }
 
   function sendMessage(event: FormEvent<HTMLFormElement>) {
@@ -574,7 +645,7 @@ export default function App() {
 
   async function startScreenShare() {
     if (
-      !voiceState.connectedChannelId ||
+      (!voiceState.connectedChannelId && !meetingRoom) ||
       screenShareState.status === 'starting' ||
       screenShareState.status === 'sharing'
     ) {
@@ -806,14 +877,14 @@ export default function App() {
             <button
               type="button"
               aria-pressed={activePanel === 'chat'}
-              onClick={() => setActivePanel('chat')}
+              onClick={showChatPanel}
             >
               Chat
             </button>
             <button
               type="button"
               aria-pressed={activePanel === 'calendar'}
-              onClick={() => setActivePanel('calendar')}
+              onClick={showCalendarPanel}
             >
               Calendar
             </button>
@@ -837,7 +908,18 @@ export default function App() {
             onNewMeetingEndsAtChange={setNewMeetingEndsAt}
             onNewMeetingStartsAtChange={setNewMeetingStartsAt}
             onNewMeetingTitleChange={setNewMeetingTitle}
+            onJoinMeeting={joinMeetingRoom}
             onShowMeetingForm={() => setShowMeetingForm(true)}
+          />
+        ) : activePanel === 'meeting' && meetingRoom ? (
+          <MeetingRoomPanel
+            meetingRoom={meetingRoom}
+            screenShareState={screenShareState}
+            onLeave={leaveMeetingRoom}
+            onStartScreenShare={startScreenShare}
+            onStopScreenShare={stopScreenShare}
+            onToggleCamera={toggleMeetingCamera}
+            onToggleMute={toggleMeetingMute}
           />
         ) : (
           <>
@@ -999,6 +1081,7 @@ function CalendarPanel({
   onNewMeetingEndsAtChange,
   onNewMeetingStartsAtChange,
   onNewMeetingTitleChange,
+  onJoinMeeting,
   onShowMeetingForm,
 }: {
   channels: Channel[]
@@ -1013,6 +1096,7 @@ function CalendarPanel({
   onNewMeetingEndsAtChange: (value: string) => void
   onNewMeetingStartsAtChange: (value: string) => void
   onNewMeetingTitleChange: (value: string) => void
+  onJoinMeeting: (meeting: CalendarMeeting) => void
   onShowMeetingForm: () => void
 }) {
   const scheduledMeetings = meetings.filter((meeting) => meeting.status === 'scheduled')
@@ -1045,6 +1129,15 @@ function CalendarPanel({
               <div className="meeting-join">
                 <strong>Join URL</strong>
                 <code>{meeting.joinUrl}</code>
+              </div>
+              <div className="meeting-card-actions">
+                <button
+                  type="button"
+                  aria-label={`Join meeting ${meeting.title}`}
+                  onClick={() => onJoinMeeting(meeting)}
+                >
+                  Join meeting
+                </button>
               </div>
             </div>
           </article>
@@ -1100,6 +1193,101 @@ function CalendarPanel({
           </section>
         </div>
       ) : null}
+    </section>
+  )
+}
+
+function MeetingRoomPanel({
+  meetingRoom,
+  screenShareState,
+  onLeave,
+  onStartScreenShare,
+  onStopScreenShare,
+  onToggleCamera,
+  onToggleMute,
+}: {
+  meetingRoom: MeetingRoomState
+  screenShareState: ScreenShareState
+  onLeave: () => void
+  onStartScreenShare: () => void
+  onStopScreenShare: () => void
+  onToggleCamera: () => void
+  onToggleMute: () => void
+}) {
+  const screenShareButtonLabel =
+    screenShareState.status === 'sharing' ? 'Stop meeting screen share' : 'Share meeting screen'
+
+  return (
+    <section className="meeting-room-panel" aria-label="Meeting room">
+      <header className="meeting-room-header">
+        <div>
+          <h2>{meetingRoom.meeting.title}</h2>
+          <p>
+            {formatMeetingDay(meetingRoom.meeting.startsAt)} ·{' '}
+            {formatMeetingClock(meetingRoom.meeting.startsAt, meetingRoom.meeting.endsAt)}
+          </p>
+        </div>
+        <strong>Media room connected</strong>
+      </header>
+
+      <div className="meeting-room-join">
+        <span>Join URL</span>
+        <code>{meetingRoom.meeting.joinUrl}</code>
+      </div>
+
+      <section className="meeting-room-grid" aria-label="Meeting participants">
+        {meetingRoom.participants.map((participant) => {
+          const status = meetingParticipantStatus(participant, meetingRoom)
+
+          return (
+            <article
+              key={participant.id}
+              className={`meeting-participant-card is-${status.replace(/\s+/g, '-')}`}
+              aria-label={`${participant.name} ${status}`}
+            >
+              <div className="meeting-participant-avatar">{initialsFor(participant.name)}</div>
+              <strong>{participant.name}</strong>
+              <span>{participant.role}</span>
+              <em>{status}</em>
+            </article>
+          )
+        })}
+      </section>
+
+      <div className="meeting-room-controls" aria-label="Meeting controls">
+        <button
+          type="button"
+          aria-label={
+            meetingRoom.selfMute ? 'Unmute meeting microphone' : 'Mute meeting microphone'
+          }
+          onClick={onToggleMute}
+        >
+          {meetingRoom.selfMute ? 'Unmute' : 'Mute'}
+        </button>
+        <button
+          type="button"
+          aria-label={meetingRoom.cameraOff ? 'Turn camera on' : 'Turn camera off'}
+          onClick={onToggleCamera}
+        >
+          {meetingRoom.cameraOff ? 'Camera on' : 'Camera off'}
+        </button>
+        <button
+          type="button"
+          aria-label={screenShareButtonLabel}
+          disabled={screenShareState.status === 'starting'}
+          onClick={screenShareState.status === 'sharing' ? onStopScreenShare : onStartScreenShare}
+        >
+          {screenShareState.status === 'sharing'
+            ? 'Stop share'
+            : screenShareState.status === 'starting'
+              ? 'Starting'
+              : 'Share'}
+        </button>
+        <button type="button" aria-label="Leave meeting" onClick={onLeave}>
+          Leave
+        </button>
+      </div>
+      <MeetingScreenShareStatus state={screenShareState} />
     </section>
   )
 }
@@ -1321,6 +1509,19 @@ function ScreenShareStatus({ state }: { state: ScreenShareState }) {
   }
 }
 
+function MeetingScreenShareStatus({ state }: { state: ScreenShareState }) {
+  switch (state.status) {
+    case 'starting':
+      return <p className="meeting-room-status">Starting screen share</p>
+    case 'sharing':
+      return <p className="meeting-room-status">Screen sharing</p>
+    case 'error':
+      return <p className="meeting-room-status is-error">{state.message}</p>
+    case 'idle':
+      return null
+  }
+}
+
 function AttachmentList({ attachments }: { attachments: MessageAttachment[] }) {
   if (attachments.length === 0) {
     return null
@@ -1391,6 +1592,25 @@ function voiceParticipantStatus(participant: VoiceParticipant, voiceState: Voice
 
   if (voiceState.selfMute) {
     return 'muted'
+  }
+
+  return 'connected'
+}
+
+function meetingParticipantStatus(
+  participant: MeetingRoomParticipant,
+  meetingRoom: MeetingRoomState,
+) {
+  if (!participant.self) {
+    return 'connected'
+  }
+
+  if (meetingRoom.selfMute) {
+    return 'muted'
+  }
+
+  if (meetingRoom.cameraOff) {
+    return 'camera off'
   }
 
   return 'connected'

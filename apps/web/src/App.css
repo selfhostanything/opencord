@@ -240,7 +240,9 @@ button {
 .voice-join-button,
 .voice-control-buttons button,
 .calendar-toolbar button,
-.meeting-dialog-actions button {
+.meeting-dialog-actions button,
+.meeting-card-actions button,
+.meeting-room-controls button {
   border: 0;
   border-radius: 6px;
   color: #ffffff;
@@ -753,6 +755,170 @@ button {
   font-size: 12px;
 }
 
+.meeting-card-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+.meeting-card-actions button {
+  min-height: 34px;
+  padding: 0 12px;
+}
+
+.meeting-room-panel {
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+  gap: 14px;
+  padding: 20px;
+}
+
+.meeting-room-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.meeting-room-header h2 {
+  margin: 0;
+  color: #ffffff;
+  font-size: 22px;
+  line-height: 1.2;
+}
+
+.meeting-room-header p {
+  margin: 5px 0 0;
+  color: #aeb5ac;
+  font-size: 13px;
+}
+
+.meeting-room-header strong {
+  flex: 0 0 auto;
+  padding: 7px 10px;
+  border: 1px solid #28796d;
+  border-radius: 6px;
+  color: #86e0bb;
+  background: #1f302c;
+  font-size: 12px;
+}
+
+.meeting-room-join {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid #3a3a3a;
+  border-radius: 8px;
+  background: #202020;
+}
+
+.meeting-room-join span {
+  color: #aeb5ac;
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.meeting-room-join code {
+  overflow-wrap: anywhere;
+  color: #dbece5;
+  font-size: 12px;
+}
+
+.meeting-room-grid {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.meeting-participant-card {
+  min-width: 0;
+  min-height: 180px;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 7px;
+  padding: 16px;
+  border: 1px solid #3a3a3a;
+  border-radius: 8px;
+  background: #1e1e1e;
+}
+
+.meeting-participant-avatar {
+  width: 64px;
+  height: 64px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  color: #ffffff;
+  background: #4b5fc4;
+  font-size: 20px;
+  font-weight: 900;
+}
+
+.meeting-participant-card strong {
+  color: #ffffff;
+  font-size: 16px;
+}
+
+.meeting-participant-card span,
+.meeting-participant-card em {
+  color: #aeb5ac;
+  font-size: 13px;
+  font-style: normal;
+}
+
+.meeting-participant-card em {
+  color: #86e0bb;
+  font-weight: 800;
+}
+
+.meeting-participant-card.is-muted em,
+.meeting-participant-card.is-camera-off em {
+  color: #f0c35a;
+}
+
+.meeting-room-controls {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #3a3a3a;
+  border-radius: 8px;
+  background: #202020;
+}
+
+.meeting-room-controls button {
+  min-width: 0;
+  min-height: 38px;
+  padding: 0 10px;
+  background: #343434;
+}
+
+.meeting-room-controls button:last-child {
+  background: #7e3a2c;
+}
+
+.meeting-room-controls button:disabled {
+  cursor: not-allowed;
+  color: #6d746b;
+  background: #252525;
+}
+
+.meeting-room-status {
+  margin: 0;
+  color: #86e0bb;
+  font-size: 13px;
+}
+
+.meeting-room-status.is-error {
+  color: #ffb29e;
+}
+
 .modal-backdrop {
   position: fixed;
   inset: 0;
@@ -1187,8 +1353,19 @@ button {
   }
 
   .meeting-card,
-  .meeting-form-grid {
+  .meeting-form-grid,
+  .meeting-room-grid,
+  .meeting-room-controls {
     grid-template-columns: 1fr;
+  }
+
+  .meeting-room-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .meeting-room-header strong {
+    text-align: center;
   }
 
   .modal-backdrop {

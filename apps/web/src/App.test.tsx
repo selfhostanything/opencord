@@ -32,6 +32,9 @@ describe('OpenCord web chat UI', () => {
     await waitFor(() => {
       expect(screen.getByText('API online')).toBeInTheDocument()
     })
+    expect(fetchMock).toHaveBeenCalledWith('http://localhost:8080/healthz', {
+      headers: { Accept: 'application/json' },
+    })
   })
 
   it('sends, edits, and deletes a local message in the selected channel', async () => {

@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
+import {
+  DEFAULT_OPENCORD_SERVER_URL,
+  createOpenCordApiClient,
+  type ServerHealth,
+} from '@opencord/api-client'
 
 import './App.css'
 
-type HealthState =
-  | { status: 'checking' }
-  | { status: 'online'; version: string }
-  | { status: 'offline'; message: string }
+type HealthState = { status: 'checking' } | ServerHealth
 
 type Space = {
   id: string
@@ -53,8 +55,6 @@ type Member = {
   role: string
   presence: 'online' | 'idle' | 'offline'
 }
-
-const DEFAULT_SERVER_URL = 'http://localhost:8080'
 
 const initialSpaces: Space[] = [
   { id: 'opencord', name: 'OpenCord', initials: 'OC', unread: true, mentions: 2 },
@@ -156,29 +156,8 @@ const members: Member[] = [
   { id: 'u5', name: 'Nok', role: 'Engineering', presence: 'offline' },
 ]
 
-function healthURL(serverURL: string) {
-  return `${serverURL.replace(/\/+$/, '')}/healthz`
-}
-
-async function fetchHealth(serverURL: string): Promise<HealthState> {
-  const response = await fetch(healthURL(serverURL), {
-    headers: { Accept: 'application/json' },
-  })
-
-  if (!response.ok) {
-    return { status: 'offline', message: `HTTP ${response.status}` }
-  }
-
-  const payload = (await response.json()) as { status?: string; version?: string }
-  if (payload.status !== 'ok') {
-    return { status: 'offline', message: 'Health response was not ok' }
-  }
-
-  return { status: 'online', version: payload.version ?? 'unknown' }
-}
-
 export default function App() {
-  const [serverURL, setServerURL] = useState(DEFAULT_SERVER_URL)
+  const [serverURL, setServerURL] = useState(DEFAULT_OPENCORD_SERVER_URL)
   const [health, setHealth] = useState<HealthState>({ status: 'checking' })
   const [spaces] = useState(initialSpaces)
   const [channels, setChannels] = useState(initialChannels)
@@ -201,7 +180,7 @@ export default function App() {
   async function checkServer(targetURL = serverURL) {
     setHealth({ status: 'checking' })
     try {
-      setHealth(await fetchHealth(targetURL))
+      setHealth(await createOpenCordApiClient({ baseUrl: targetURL }).health())
     } catch (error) {
       setHealth({
         status: 'offline',
@@ -211,7 +190,7 @@ export default function App() {
   }
 
   useEffect(() => {
-    void checkServer(DEFAULT_SERVER_URL)
+    void checkServer(DEFAULT_OPENCORD_SERVER_URL)
   }, [])
 
   function submitServer(event: FormEvent<HTMLFormElement>) {

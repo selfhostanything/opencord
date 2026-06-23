@@ -180,6 +180,10 @@ describe('OpenCord web chat UI', () => {
       within(developerSettings).getByRole('heading', { name: 'Developer settings' }),
     ).toBeInTheDocument()
     expect(developerSettings).toHaveTextContent('0 bot applications')
+    expect(within(developerSettings).getByLabelText('Read messages')).toBeChecked()
+    expect(within(developerSettings).getByLabelText('Send messages')).toBeChecked()
+    expect(within(developerSettings).getByLabelText('Use slash commands')).toBeChecked()
+    await userEvent.click(within(developerSettings).getByLabelText('Manage webhooks'))
 
     await userEvent.type(
       within(developerSettings).getByLabelText('Bot application name'),
@@ -199,6 +203,21 @@ describe('OpenCord web chat UI', () => {
     expect(initialToken).toMatch(/^ocb_/)
     expect(developerSettings).toHaveTextContent('/api/compat/discord/v10')
     expect(developerSettings).toHaveTextContent('/api/compat/discord/gateway')
+    const botApplications = within(developerSettings).getByRole('region', {
+      name: 'Bot applications',
+    })
+    expect(botApplications).toHaveTextContent('Read messages')
+    expect(botApplications).toHaveTextContent('Send messages')
+    expect(botApplications).toHaveTextContent('Use slash commands')
+    expect(botApplications).toHaveTextContent('Manage webhooks')
+
+    const auditEvents = within(developerSettings).getByRole('region', {
+      name: 'Developer audit events',
+    })
+    expect(auditEvents).toHaveTextContent('bot.created')
+    expect(auditEvents).toHaveTextContent('Deploy Bot')
+    expect(auditEvents).toHaveTextContent('Manage webhooks')
+    expect(auditEvents).not.toHaveTextContent(initialToken ?? '')
 
     await userEvent.click(
       within(developerSettings).getByRole('button', {
@@ -209,6 +228,8 @@ describe('OpenCord web chat UI', () => {
     const rotatedToken = within(developerSettings).getByLabelText('Shown-once bot token').textContent
     expect(rotatedToken).toMatch(/^ocb_/)
     expect(rotatedToken).not.toBe(initialToken)
+    expect(auditEvents).toHaveTextContent('bot.token_rotated')
+    expect(auditEvents).not.toHaveTextContent(rotatedToken ?? '')
 
     await userEvent.click(
       within(developerSettings).getByRole('button', {
@@ -217,6 +238,7 @@ describe('OpenCord web chat UI', () => {
     )
 
     expect(developerSettings).toHaveTextContent('Invited to OpenCord')
+    expect(auditEvents).toHaveTextContent('bot.invited_to_space')
   })
 
   it('uses server-backed developer bot APIs when server context is configured', async () => {
@@ -576,6 +598,15 @@ describe('OpenCord web chat UI', () => {
     await waitFor(() => {
       expect(webhooks).not.toHaveTextContent('Release Hook')
     })
+    const auditEvents = within(developerSettings).getByRole('region', {
+      name: 'Developer audit events',
+    })
+    expect(auditEvents).toHaveTextContent('webhook.created')
+    expect(auditEvents).toHaveTextContent('webhook.loaded')
+    expect(auditEvents).toHaveTextContent('webhook.token_rotated')
+    expect(auditEvents).toHaveTextContent('webhook.deleted')
+    expect(auditEvents).not.toHaveTextContent('ocw_server_created')
+    expect(auditEvents).not.toHaveTextContent('ocw_server_rotated')
   })
 
   it('opens and leaves a meeting room from the calendar', async () => {

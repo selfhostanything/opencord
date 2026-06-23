@@ -135,8 +135,28 @@ type DeveloperBot = {
   name: string
   description: string
   token: string
+  permissions: DeveloperPermissionId[]
   invitedSpaceIds: string[]
   serverManaged?: boolean
+}
+
+type DeveloperPermissionId =
+  | 'read_messages'
+  | 'send_messages'
+  | 'use_slash_commands'
+  | 'manage_webhooks'
+
+type DeveloperPermissionOption = {
+  id: DeveloperPermissionId
+  label: string
+}
+
+type DeveloperAuditEvent = {
+  id: string
+  type: string
+  target: string
+  detail: string
+  time: string
 }
 
 type DeveloperWebhook = {
@@ -353,6 +373,19 @@ const initialMeetings: CalendarMeeting[] = [
   },
 ]
 
+const developerPermissionOptions: DeveloperPermissionOption[] = [
+  { id: 'read_messages', label: 'Read messages' },
+  { id: 'send_messages', label: 'Send messages' },
+  { id: 'use_slash_commands', label: 'Use slash commands' },
+  { id: 'manage_webhooks', label: 'Manage webhooks' },
+]
+
+const defaultDeveloperPermissionIds: DeveloperPermissionId[] = [
+  'read_messages',
+  'send_messages',
+  'use_slash_commands',
+]
+
 export default function App() {
   const [serverConnections, setServerConnections] = useState(() =>
     loadBrowserServerConnectionState(),
@@ -385,6 +418,10 @@ export default function App() {
   const [meetingRoom, setMeetingRoom] = useState<MeetingRoomState | null>(null)
   const [developerBots, setDeveloperBots] = useState<DeveloperBot[]>([])
   const [developerWebhooks, setDeveloperWebhooks] = useState<DeveloperWebhook[]>([])
+  const [developerAuditEvents, setDeveloperAuditEvents] = useState<DeveloperAuditEvent[]>([])
+  const [selectedDeveloperPermissionIds, setSelectedDeveloperPermissionIds] = useState<
+    DeveloperPermissionId[]
+  >(defaultDeveloperPermissionIds)
   const [developerSessionToken, setDeveloperSessionToken] = useState('')
   const [developerOrganizationId, setDeveloperOrganizationId] = useState('')
   const [developerSpaceId, setDeveloperSpaceId] = useState('')
@@ -523,6 +560,25 @@ export default function App() {
     }
   }
 
+  function appendDeveloperAuditEvent(event: Omit<DeveloperAuditEvent, 'id' | 'time'>) {
+    setDeveloperAuditEvents((current) => [
+      {
+        ...event,
+        id: `developer-audit-${Date.now()}-${current.length}`,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      },
+      ...current,
+    ])
+  }
+
+  function toggleDeveloperPermission(permissionId: DeveloperPermissionId) {
+    setSelectedDeveloperPermissionIds((current) =>
+      current.includes(permissionId)
+        ? current.filter((candidate) => candidate !== permissionId)
+        : [...current, permissionId],
+    )
+  }
+
   async function createDeveloperBot(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const name = newBotName.trim()
@@ -530,6 +586,7 @@ export default function App() {
       return
     }
     const description = newBotDescription.trim()
+    const permissions = selectedDeveloperPermissionIds
 
     setDeveloperError(null)
     const context = developerApiContext()
@@ -548,10 +605,16 @@ export default function App() {
             name: created.botApplication.name,
             description: created.botApplication.description || 'No description',
             token: created.botToken.token,
+            permissions,
             invitedSpaceIds: [],
             serverManaged: true,
           },
         ])
+        appendDeveloperAuditEvent({
+          type: 'bot.created',
+          target: created.botApplication.name,
+          detail: developerPermissionSummary(permissions),
+        })
         setNewBotName('')
         setNewBotDescription('')
       } catch (error) {
@@ -567,9 +630,15 @@ export default function App() {
         name,
         description: description || 'No description',
         token: createLocalBotToken(),
+        permissions,
         invitedSpaceIds: [],
       },
     ])
+    appendDeveloperAuditEvent({
+      type: 'bot.created',
+      target: name,
+      detail: developerPermissionSummary(permissions),
+    })
     setNewBotName('')
     setNewBotDescription('')
   }
@@ -595,6 +664,11 @@ export default function App() {
           ...current.filter((webhook) => webhook.id !== created.id),
           developerWebhookFromShownToken(created),
         ])
+        appendDeveloperAuditEvent({
+          type: 'webhook.created',
+          target: created.name,
+          detail: `Channel ${created.channelId} · token last 4 ${created.tokenLastFour}`,
+        })
         setNewWebhookName('')
       } catch (error) {
         setDeveloperError(error instanceof Error ? error.message : 'Unable to create webhook')
@@ -615,6 +689,11 @@ export default function App() {
         executeUrl: webhookExecuteURL(activeConnection.baseUrl, id, token),
       },
     ])
+    appendDeveloperAuditEvent({
+      type: 'webhook.created',
+      target: name,
+      detail: `Channel ${selectedChannel.id} · token last 4 ${token.slice(-4)}`,
+    })
     setNewWebhookName('')
   }
 
@@ -629,6 +708,13 @@ export default function App() {
     try {
       const webhooks = await context.client.listIncomingWebhooks(context.channelId)
       setDeveloperWebhooks(webhooks.map(developerWebhookFromDetail))
+      webhooks.forEach((webhook) => {
+        appendDeveloperAuditEvent({
+          type: 'webhook.loaded',
+          target: webhook.name,
+          detail: `Channel ${webhook.channelId} · token last 4 ${webhook.tokenLastFour}`,
+        })
+      })
     } catch (error) {
       setDeveloperError(error instanceof Error ? error.message : 'Unable to load webhooks')
     }
@@ -651,6 +737,11 @@ export default function App() {
             candidate.id === webhookId ? developerWebhookFromShownToken(rotated) : candidate,
           ),
         )
+        appendDeveloperAuditEvent({
+          type: 'webhook.token_rotated',
+          target: rotated.name,
+          detail: `Channel ${rotated.channelId} · token last 4 ${rotated.tokenLastFour}`,
+        })
       } catch (error) {
         setDeveloperError(error instanceof Error ? error.message : 'Unable to rotate webhook token')
       }
@@ -670,6 +761,13 @@ export default function App() {
           : candidate,
       ),
     )
+    if (webhook) {
+      appendDeveloperAuditEvent({
+        type: 'webhook.token_rotated',
+        target: webhook.name,
+        detail: `Channel ${webhook.channelId} · token last 4 ${token.slice(-4)}`,
+      })
+    }
   }
 
   async function deleteDeveloperWebhook(webhookId: string) {
@@ -691,6 +789,13 @@ export default function App() {
     }
 
     setDeveloperWebhooks((current) => current.filter((candidate) => candidate.id !== webhookId))
+    if (webhook) {
+      appendDeveloperAuditEvent({
+        type: 'webhook.deleted',
+        target: webhook.name,
+        detail: `Channel ${webhook.channelId}`,
+      })
+    }
   }
 
   async function loadDeveloperBotsFromServer() {
@@ -711,10 +816,20 @@ export default function App() {
           name: detail.botApplication.name,
           description: detail.botApplication.description || 'No description',
           token: hiddenBotTokenLabel(detail.activeTokenLastFour),
+          permissions: defaultDeveloperPermissionIds,
           invitedSpaceIds: detail.spaceMemberships.map((membership) => membership.spaceId),
           serverManaged: true,
         })),
       )
+      details.forEach((detail) => {
+        appendDeveloperAuditEvent({
+          type: 'bot.loaded',
+          target: detail.botApplication.name,
+          detail: detail.activeTokenLastFour
+            ? `Token last 4 ${detail.activeTokenLastFour}`
+            : 'No active token',
+        })
+      })
     } catch (error) {
       setDeveloperError(error instanceof Error ? error.message : 'Unable to load bots')
     }
@@ -732,17 +847,30 @@ export default function App() {
             candidate.id === botId ? { ...candidate, token: token.token } : candidate,
           ),
         )
+        appendDeveloperAuditEvent({
+          type: 'bot.token_rotated',
+          target: bot.name,
+          detail: `Token last 4 ${token.tokenLastFour}`,
+        })
       } catch (error) {
         setDeveloperError(error instanceof Error ? error.message : 'Unable to rotate token')
       }
       return
     }
 
+    const token = createLocalBotToken()
     setDeveloperBots((current) =>
       current.map((bot) =>
-        bot.id === botId ? { ...bot, token: createLocalBotToken() } : bot,
+        bot.id === botId ? { ...bot, token } : bot,
       ),
     )
+    if (bot) {
+      appendDeveloperAuditEvent({
+        type: 'bot.token_rotated',
+        target: bot.name,
+        detail: `Token last 4 ${token.slice(-4)}`,
+      })
+    }
   }
 
   async function inviteDeveloperBotToCurrentSpace(botId: string) {
@@ -774,6 +902,11 @@ export default function App() {
             }
           }),
         )
+        appendDeveloperAuditEvent({
+          type: 'bot.invited_to_space',
+          target: bot.name,
+          detail: `Space ${invite.member.spaceId} · role ${invite.member.role}`,
+        })
       } catch (error) {
         setDeveloperError(error instanceof Error ? error.message : 'Unable to invite bot')
       }
@@ -789,6 +922,13 @@ export default function App() {
         return { ...bot, invitedSpaceIds: [...bot.invitedSpaceIds, selectedSpace.id] }
       }),
     )
+    if (bot && !bot.invitedSpaceIds.includes(selectedSpace.id)) {
+      appendDeveloperAuditEvent({
+        type: 'bot.invited_to_space',
+        target: bot.name,
+        detail: `Space ${selectedSpace.name} · role member`,
+      })
+    }
   }
 
   function addChannel(event: FormEvent<HTMLFormElement>) {
@@ -1293,6 +1433,7 @@ export default function App() {
         {activePanel === 'developers' ? (
           <DeveloperSettingsPanel
             activeConnection={activeConnection}
+            auditEvents={developerAuditEvents}
             bots={developerBots}
             developerError={developerError}
             developerChannelId={developerChannelId}
@@ -1303,6 +1444,7 @@ export default function App() {
             newBotName={newBotName}
             newWebhookName={newWebhookName}
             selectedChannel={selectedChannel}
+            selectedPermissionIds={selectedDeveloperPermissionIds}
             selectedSpace={selectedSpace}
             webhooks={developerWebhooks}
             onCreateBot={createDeveloperBot}
@@ -1320,6 +1462,7 @@ export default function App() {
             onNewWebhookNameChange={setNewWebhookName}
             onRotateToken={rotateDeveloperBotToken}
             onRotateWebhookToken={rotateDeveloperWebhookToken}
+            onTogglePermission={toggleDeveloperPermission}
           />
         ) : activePanel === 'calendar' ? (
           <CalendarPanel
@@ -1498,6 +1641,7 @@ export default function App() {
 
 function DeveloperSettingsPanel({
   activeConnection,
+  auditEvents,
   bots,
   developerError,
   developerChannelId,
@@ -1508,6 +1652,7 @@ function DeveloperSettingsPanel({
   newBotName,
   newWebhookName,
   selectedChannel,
+  selectedPermissionIds,
   selectedSpace,
   webhooks,
   onCreateBot,
@@ -1525,8 +1670,10 @@ function DeveloperSettingsPanel({
   onNewWebhookNameChange,
   onRotateToken,
   onRotateWebhookToken,
+  onTogglePermission,
 }: {
   activeConnection: ServerConnection
+  auditEvents: DeveloperAuditEvent[]
   bots: DeveloperBot[]
   developerError: string | null
   developerChannelId: string
@@ -1537,6 +1684,7 @@ function DeveloperSettingsPanel({
   newBotName: string
   newWebhookName: string
   selectedChannel: Channel
+  selectedPermissionIds: DeveloperPermissionId[]
   selectedSpace: Space
   webhooks: DeveloperWebhook[]
   onCreateBot: (event: FormEvent<HTMLFormElement>) => void | Promise<void>
@@ -1554,6 +1702,7 @@ function DeveloperSettingsPanel({
   onNewWebhookNameChange: (value: string) => void
   onRotateToken: (botId: string) => void | Promise<void>
   onRotateWebhookToken: (webhookId: string) => void | Promise<void>
+  onTogglePermission: (permissionId: DeveloperPermissionId) => void
 }) {
   const serverBaseURL = activeConnection.baseUrl.replace(/\/+$/g, '')
   const inviteTargetSpaceId = developerSpaceId.trim() || selectedSpace.id
@@ -1644,6 +1793,21 @@ function DeveloperSettingsPanel({
             onChange={(event) => onNewBotDescriptionChange(event.target.value)}
           />
         </div>
+        <fieldset className="developer-permission-picker">
+          <legend>Bot permissions</legend>
+          <div className="developer-permission-options">
+            {developerPermissionOptions.map((permission) => (
+              <label key={permission.id} className="developer-permission-option">
+                <input
+                  type="checkbox"
+                  checked={selectedPermissionIds.includes(permission.id)}
+                  onChange={() => onTogglePermission(permission.id)}
+                />
+                <span>{permission.label}</span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
         <button type="submit" disabled={!newBotName.trim()}>
           Create bot application
         </button>
@@ -1669,6 +1833,12 @@ function DeveloperSettingsPanel({
                 <div className="developer-token-row">
                   <strong>Shown-once token</strong>
                   <code aria-label="Shown-once bot token">{bot.token}</code>
+                </div>
+
+                <div className="developer-permission-chips" aria-label={`${bot.name} permissions`}>
+                  {bot.permissions.map((permission) => (
+                    <span key={permission}>{developerPermissionLabel(permission)}</span>
+                  ))}
                 </div>
 
                 <div className="developer-endpoints">
@@ -1765,6 +1935,23 @@ function DeveloperSettingsPanel({
                   Delete webhook
                 </button>
               </div>
+            </article>
+          ))
+        )}
+      </section>
+
+      <section className="developer-audit-list" aria-label="Developer audit events">
+        {auditEvents.length === 0 ? (
+          <div className="empty-state">No developer audit events yet.</div>
+        ) : (
+          auditEvents.map((event) => (
+            <article key={event.id} className="developer-audit-card">
+              <header>
+                <code>{event.type}</code>
+                <time>{event.time}</time>
+              </header>
+              <strong>{event.target}</strong>
+              <p>{event.detail}</p>
             </article>
           ))
         )}
@@ -2440,6 +2627,21 @@ function formatBytes(sizeBytes: number) {
 
 function richEmbedLabel(embed: RichEmbed) {
   return embed.title ?? embed.author?.name ?? embed.description?.slice(0, 64) ?? 'Untitled'
+}
+
+function developerPermissionLabel(permissionId: DeveloperPermissionId) {
+  return (
+    developerPermissionOptions.find((permission) => permission.id === permissionId)?.label ??
+    permissionId
+  )
+}
+
+function developerPermissionSummary(permissionIds: DeveloperPermissionId[]) {
+  if (permissionIds.length === 0) {
+    return 'No permissions selected'
+  }
+
+  return permissionIds.map(developerPermissionLabel).join(', ')
 }
 
 function richEmbedAccentColor(color: number | undefined) {

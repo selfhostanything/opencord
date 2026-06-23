@@ -11,6 +11,10 @@ Typed REST client boundary shared by web, desktop, and mobile clients.
 - `OpenCordApiError`
 - `ServerHealth`
 - `ServerDiscovery`
+- `AuthResult`
+- `AuthUser`
+- `OidcProvider`
+- `CompleteOidcLoginRequest`
 - `RegisterPushTokenRequest`
 - `PushToken`
 - `JoinVoiceChannelRequest`
@@ -22,15 +26,23 @@ Typed REST client boundary shared by web, desktop, and mobile clients.
 - `MeetingReminder`
 
 The v1 hand-written SDK covers server health, well-known discovery,
-`/api/version`, `/api/capabilities`, `POST /push-tokens`, `GET /push-tokens`,
-`POST /voice/channels/{channel_id}/join`, and `GET /join/{join_slug}`. Future
-generated OpenAPI clients can live behind this package boundary without
+`/api/version`, `/api/capabilities`, `GET /auth/oidc/providers`,
+`POST /auth/oidc/callback`, `POST /push-tokens`, `GET /push-tokens`,
+`POST /voice/channels/{channel_id}/join`, and `GET /join/{join_slug}`.
+Future generated OpenAPI clients can live behind this package boundary without
 changing app imports.
 
 Authenticated calls accept a bearer session token through:
 
 ```ts
 createOpenCordApiClient({ sessionToken: '...' })
+```
+
+OIDC login discovery is shared by web, desktop, and mobile clients:
+
+```ts
+const providers = await client.oidcProvidersForEmail('member@company.example')
+const session = await client.completeOidcLogin(providerAssertion)
 ```
 
 Voice join calls return the user voice participant state and the LiveKit media

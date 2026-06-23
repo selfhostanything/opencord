@@ -37,6 +37,42 @@ export type PushToken = {
   updatedAt: string
 }
 
+export type AuthUser = {
+  id: string
+  email: string
+  displayName: string
+}
+
+export type AuthSession = {
+  token: string
+}
+
+export type AuthResult = {
+  user: AuthUser
+  session: AuthSession
+}
+
+export type OidcProvider = {
+  organizationId: string
+  issuer: string
+  authorizationEndpoint: string
+  tokenEndpoint: string
+  jwksUri: string
+  clientId: string
+  allowedDomains: string[]
+  requireSso: boolean
+  autoJoinRole: string
+}
+
+export type CompleteOidcLoginRequest = {
+  issuer: string
+  subject: string
+  email: string
+  displayName: string
+  emailVerified: boolean
+  signature: string
+}
+
 export type JoinVoiceChannelRequest = {
   selfMute?: boolean
   selfDeaf?: boolean
@@ -153,6 +189,37 @@ type PushTokenResourcePayload = {
 
 type PushTokenListPayload = {
   push_tokens?: unknown
+}
+
+type AuthUserPayload = {
+  id?: unknown
+  email?: unknown
+  display_name?: unknown
+}
+
+type AuthSessionPayload = {
+  token?: unknown
+}
+
+type AuthResultPayload = {
+  user?: unknown
+  session?: unknown
+}
+
+type OidcProviderPayload = {
+  organization_id?: unknown
+  issuer?: unknown
+  authorization_endpoint?: unknown
+  token_endpoint?: unknown
+  jwks_uri?: unknown
+  client_id?: unknown
+  allowed_domains?: unknown
+  require_sso?: unknown
+  auto_join_role?: unknown
+}
+
+type OidcProvidersPayload = {
+  providers?: unknown
 }
 
 type MediaTokenGrantsPayload = {
@@ -328,6 +395,30 @@ export class OpenCordApiClient {
     ])
 
     return { wellKnown, version, capabilities }
+  }
+
+  async oidcProvidersForEmail(email: string): Promise<OidcProvider[]> {
+    const payload = await this.requestJson<OidcProvidersPayload>(
+      `/auth/oidc/providers?email=${encodeURIComponent(email)}`,
+    )
+
+    return arrayValue(payload.providers).map(oidcProviderFromPayload)
+  }
+
+  async completeOidcLogin(request: CompleteOidcLoginRequest): Promise<AuthResult> {
+    const payload = await this.requestJson<AuthResultPayload>('/auth/oidc/callback', {
+      body: JSON.stringify({
+        issuer: request.issuer,
+        subject: request.subject,
+        email: request.email,
+        display_name: request.displayName,
+        email_verified: request.emailVerified,
+        signature: request.signature,
+      }),
+      method: 'POST',
+    })
+
+    return authResultFromPayload(payload)
   }
 
   async registerPushToken(request: RegisterPushTokenRequest): Promise<PushToken> {
@@ -566,6 +657,49 @@ function pushTokenFromPayload(value: unknown): PushToken {
     deviceName: nullableStringValue(payload.device_name),
     createdAt: stringValue(payload.created_at, ''),
     updatedAt: stringValue(payload.updated_at, ''),
+  }
+}
+
+function authResultFromPayload(value: AuthResultPayload): AuthResult {
+  return {
+    user: authUserFromPayload(value.user),
+    session: authSessionFromPayload(value.session),
+  }
+}
+
+function authUserFromPayload(value: unknown): AuthUser {
+  const payload = objectValue(value) as AuthUserPayload
+
+  return {
+    id: stringValue(payload.id, ''),
+    email: stringValue(payload.email, ''),
+    displayName: stringValue(payload.display_name, ''),
+  }
+}
+
+function authSessionFromPayload(value: unknown): AuthSession {
+  const payload = objectValue(value) as AuthSessionPayload
+
+  return {
+    token: stringValue(payload.token, ''),
+  }
+}
+
+function oidcProviderFromPayload(value: unknown): OidcProvider {
+  const payload = objectValue(value) as OidcProviderPayload
+
+  return {
+    organizationId: stringValue(payload.organization_id, ''),
+    issuer: stringValue(payload.issuer, ''),
+    authorizationEndpoint: stringValue(payload.authorization_endpoint, ''),
+    tokenEndpoint: stringValue(payload.token_endpoint, ''),
+    jwksUri: stringValue(payload.jwks_uri, ''),
+    clientId: stringValue(payload.client_id, ''),
+    allowedDomains: arrayValue(payload.allowed_domains).filter(
+      (domain): domain is string => typeof domain === 'string',
+    ),
+    requireSso: booleanValue(payload.require_sso, false),
+    autoJoinRole: stringValue(payload.auto_join_role, 'member'),
   }
 }
 

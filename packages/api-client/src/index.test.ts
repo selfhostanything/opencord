@@ -117,6 +117,100 @@ describe('OpenCord API client', () => {
     expect(error).toHaveProperty('message', 'missing')
   })
 
+  it('discovers OIDC providers and completes signed OIDC login', async () => {
+    const fetchMock = vi
+      .fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          providers: [
+            {
+              organization_id: '019ef32c-6cee-7933-9a6e-8d3e6f45905e',
+              issuer: 'https://idp.company.example',
+              authorization_endpoint: 'https://idp.company.example/oauth2/authorize',
+              token_endpoint: 'https://idp.company.example/oauth2/token',
+              jwks_uri: 'https://idp.company.example/oauth2/jwks',
+              client_id: 'opencord',
+              allowed_domains: ['company.example'],
+              require_sso: true,
+              auto_join_role: 'member',
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          user: {
+            id: '019ef32c-6cee-7933-9a6e-8d3e6f45905f',
+            email: 'member@company.example',
+            display_name: 'Member User',
+          },
+          session: {
+            token: 'session-token',
+          },
+        }),
+      )
+    const client = createOpenCordApiClient({
+      baseUrl: 'https://chat.example.com',
+      fetch: fetchMock,
+    })
+
+    await expect(client.oidcProvidersForEmail('member@company.example')).resolves.toEqual([
+      {
+        organizationId: '019ef32c-6cee-7933-9a6e-8d3e6f45905e',
+        issuer: 'https://idp.company.example',
+        authorizationEndpoint: 'https://idp.company.example/oauth2/authorize',
+        tokenEndpoint: 'https://idp.company.example/oauth2/token',
+        jwksUri: 'https://idp.company.example/oauth2/jwks',
+        clientId: 'opencord',
+        allowedDomains: ['company.example'],
+        requireSso: true,
+        autoJoinRole: 'member',
+      },
+    ])
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      'https://chat.example.com/auth/oidc/providers?email=member%40company.example',
+      {
+        headers: { Accept: 'application/json' },
+      },
+    )
+
+    await expect(
+      client.completeOidcLogin({
+        issuer: 'https://idp.company.example',
+        subject: 'idp-user-1',
+        email: 'member@company.example',
+        displayName: 'Member User',
+        emailVerified: true,
+        signature: 'signed-provider-assertion',
+      }),
+    ).resolves.toEqual({
+      user: {
+        id: '019ef32c-6cee-7933-9a6e-8d3e6f45905f',
+        email: 'member@company.example',
+        displayName: 'Member User',
+      },
+      session: {
+        token: 'session-token',
+      },
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(2, 'https://chat.example.com/auth/oidc/callback', {
+      body: JSON.stringify({
+        issuer: 'https://idp.company.example',
+        subject: 'idp-user-1',
+        email: 'member@company.example',
+        display_name: 'Member User',
+        email_verified: true,
+        signature: 'signed-provider-assertion',
+      }),
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      method: 'POST',
+    })
+  })
+
   it('registers push tokens with bearer auth and maps masked responses', async () => {
     const fetchMock = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>()
     fetchMock.mockResolvedValue(

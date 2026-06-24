@@ -41,7 +41,15 @@ import {
   type DeviceSessionStores,
   type ServerConnection,
 } from '@opencord/server-connections'
-import type { OpenCordSettingsPanel } from '@opencord/client-contracts'
+import {
+  displayOpenCordChannelName,
+  formatOpenCordMeetingClock,
+  formatOpenCordMeetingDay,
+  normalizeOpenCordChannelName,
+  openCordMeetingChannelLabel,
+  slugOpenCordTitle,
+  type OpenCordSettingsPanel,
+} from '@opencord/client-contracts'
 
 import { WorkspaceLayout } from '../../layouts/WorkspaceLayout'
 import { useWorkspaceUiStore } from './state/workspaceUiStore'
@@ -712,7 +720,9 @@ export function WorkspaceShell({
       })),
       voice: {
         channelId: voiceState.connectedChannelId,
-        channelName: desktopVoiceChannel ? displayChannelName(desktopVoiceChannel.name) : null,
+        channelName: desktopVoiceChannel
+          ? displayOpenCordChannelName(desktopVoiceChannel.name)
+          : null,
         connected: Boolean(desktopVoiceChannel),
         deafened: voiceState.selfDeaf,
         muted: voiceState.selfMute,
@@ -1680,7 +1690,7 @@ export function WorkspaceShell({
 
   async function addChannel(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const name = normalizeChannelName(newChannelName)
+    const name = normalizeOpenCordChannelName(newChannelName)
     if (!name) {
       return
     }
@@ -1777,7 +1787,7 @@ export function WorkspaceShell({
       }
     }
 
-    const joinSlug = `local-${slugForMeetingTitle(title)}`
+    const joinSlug = `local-${slugOpenCordTitle(title)}`
     const meeting: CalendarMeeting = {
       id: `${joinSlug}-${Date.now()}`,
       title,
@@ -3604,13 +3614,13 @@ function CalendarPanel({
         {scheduledMeetings.map((meeting) => (
           <article key={meeting.id} className="meeting-card">
             <div className="meeting-card-time">
-              <time dateTime={meeting.startsAt}>{formatMeetingDay(meeting.startsAt)}</time>
-              <span>{formatMeetingClock(meeting.startsAt, meeting.endsAt)}</span>
+              <time dateTime={meeting.startsAt}>{formatOpenCordMeetingDay(meeting.startsAt)}</time>
+              <span>{formatOpenCordMeetingClock(meeting.startsAt, meeting.endsAt)}</span>
             </div>
             <div className="meeting-card-body">
               <header>
                 <h3>{meeting.title}</h3>
-                <span>{meetingChannelName(meeting, channels)}</span>
+                <span>{openCordMeetingChannelLabel(meeting, channels)}</span>
               </header>
               <p>Organized by {meeting.organizer}</p>
               <div className="meeting-join">
@@ -3714,8 +3724,8 @@ function MeetingRoomPanel({
         <div>
           <h2>{meetingRoom.meeting.title}</h2>
           <p>
-            {formatMeetingDay(meetingRoom.meeting.startsAt)} ·{' '}
-            {formatMeetingClock(meetingRoom.meeting.startsAt, meetingRoom.meeting.endsAt)}
+            {formatOpenCordMeetingDay(meetingRoom.meeting.startsAt)} ·{' '}
+            {formatOpenCordMeetingClock(meetingRoom.meeting.startsAt, meetingRoom.meeting.endsAt)}
           </p>
         </div>
         <strong>{meetingMediaStatusLabel(meetingRoom)}</strong>
@@ -3826,7 +3836,7 @@ function ChannelNavigationRow({
   onJoinVoice: (channelId: string) => void
 }) {
   if (channel.kind === 'voice') {
-    const voiceChannelName = displayChannelName(channel.name)
+    const voiceChannelName = displayOpenCordChannelName(channel.name)
     const isConnected = voiceState.connectedChannelId === channel.id
     const participants = voiceParticipantsForChannel(voiceState, channel.id)
 
@@ -3942,7 +3952,9 @@ function VoiceControls({
     <section className="voice-controls" aria-label="Voice controls">
       <div className="voice-controls-status">
         <strong>{isConnected ? 'Voice connected' : 'Not connected'}</strong>
-        <span>{isConnected ? displayChannelName(activeChannel.name) : 'Join a voice channel'}</span>
+        <span>
+          {isConnected ? displayOpenCordChannelName(activeChannel.name) : 'Join a voice channel'}
+        </span>
         {activeParticipants.length > 0 ? (
           <span className="voice-controls-participants">
             {activeParticipants.map((participant) => participant.name).join(', ')}
@@ -4151,7 +4163,7 @@ function channelFromApi(channel: ApiChannel): Channel {
     id: channel.id,
     spaceId: channel.spaceId,
     kind: channel.kind,
-    name: channel.slug || normalizeChannelName(channel.name) || channel.name,
+    name: channel.slug || normalizeOpenCordChannelName(channel.name) || channel.name,
     topic: channel.topic || 'Local alpha channel',
     category: channel.kind === 'voice' ? 'Voice channels' : 'Text channels',
     canSend: channel.kind === 'text',
@@ -4467,46 +4479,6 @@ function formatEmbedTimestamp(value: string) {
   })
 }
 
-function formatMeetingDay(value: string) {
-  const date = parseMeetingDate(value)
-  if (!date) {
-    return value
-  }
-
-  return new Intl.DateTimeFormat(undefined, {
-    month: 'short',
-    day: 'numeric',
-  }).format(date)
-}
-
-function formatMeetingClock(startsAt: string, endsAt: string) {
-  const start = parseMeetingDate(startsAt)
-  const end = parseMeetingDate(endsAt)
-  if (!start || !end) {
-    return `${startsAt} - ${endsAt}`
-  }
-
-  const formatter = new Intl.DateTimeFormat(undefined, {
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-  return `${formatter.format(start)} - ${formatter.format(end)}`
-}
-
-function meetingChannelName(meeting: CalendarMeeting, channels: Channel[]) {
-  const channel = channels.find((candidate) => candidate.id === meeting.channelId)
-  if (!channel) {
-    return 'Workspace'
-  }
-
-  return `${channel.kind === 'voice' ? 'Voice' : '#'} ${displayChannelName(channel.name)}`
-}
-
-function parseMeetingDate(value: string) {
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? undefined : date
-}
-
 function safeRealtimeURL(serverURL: string) {
   try {
     return realtimeUrlForServer(serverURL)
@@ -4588,24 +4560,10 @@ function realtimeStatusText(status: RealtimeConnectionStatus) {
   }
 }
 
-function normalizeChannelName(name: string) {
-  return name
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9- ]/g, '')
-    .replace(/\s+/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '')
-}
-
-function slugForMeetingTitle(title: string) {
-  return normalizeChannelName(title) || 'meeting'
-}
-
 let localBotTokenCounter = 0
 
 function createLocalBotId(name: string) {
-  return `local-bot-${Date.now()}-${slugForMeetingTitle(name)}`
+  return `local-bot-${Date.now()}-${slugOpenCordTitle(name)}`
 }
 
 function createLocalBotToken() {
@@ -4633,7 +4591,7 @@ function hiddenBotTokenLabel(lastFour: string | null) {
 let localWebhookTokenCounter = 0
 
 function createLocalWebhookId(name: string) {
-  return `local-webhook-${Date.now()}-${slugForMeetingTitle(name)}`
+  return `local-webhook-${Date.now()}-${slugOpenCordTitle(name)}`
 }
 
 function createLocalWebhookToken() {
@@ -4684,13 +4642,6 @@ function developerWebhookFromShownToken(webhook: IncomingWebhookWithToken): Deve
     executeUrl: webhook.executeUrl,
     serverManaged: true,
   }
-}
-
-function displayChannelName(name: string) {
-  return name
-    .split('-')
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(' ')
 }
 
 function initialsFor(name: string) {

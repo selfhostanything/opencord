@@ -4,11 +4,17 @@ import {
   buildOpenCordDeepLink,
   buildOpenCordNotificationDeepLink,
   buildOpenCordRoutePath,
+  displayOpenCordChannelName,
+  formatOpenCordMeetingClock,
+  formatOpenCordMeetingDay,
+  normalizeOpenCordChannelName,
+  openCordMeetingChannelLabel,
   parseOpenCordDeepLink,
   parseOpenCordNotificationDeepLink,
   parseOpenCordNotificationRoute,
   parseOpenCordNotificationRouteTarget,
   parseOpenCordRouteTarget,
+  slugOpenCordTitle,
   type OpenCordRouteTarget,
 } from './index'
 
@@ -173,5 +179,37 @@ describe('OpenCord client route contracts', () => {
         },
       }),
     ).toBeNull()
+  })
+
+  it('formats shared workspace labels without browser or native APIs', () => {
+    expect(normalizeOpenCordChannelName(' Roadmap Review!! ')).toBe('roadmap-review')
+    expect(normalizeOpenCordChannelName('---')).toBe('')
+    expect(slugOpenCordTitle('Roadmap Review')).toBe('roadmap-review')
+    expect(slugOpenCordTitle('???')).toBe('meeting')
+    expect(displayOpenCordChannelName('office-hours')).toBe('Office Hours')
+    expect(displayOpenCordChannelName('general')).toBe('General')
+  })
+
+  it('formats shared meeting labels for web and native clients', () => {
+    const channels = [
+      { id: 'general', kind: 'text' as const, name: 'general' },
+      { id: 'standup', kind: 'voice' as const, name: 'standup' },
+    ]
+
+    expect(formatOpenCordMeetingDay('2026-06-25T10:00:00', 'en-US')).toBe('Jun 25')
+    expect(
+      formatOpenCordMeetingClock(
+        '2026-06-25T10:00:00',
+        '2026-06-25T10:30:00',
+        'en-US',
+      ),
+    ).toMatch(/10:00\s*AM - 10:30\s*AM/)
+    expect(formatOpenCordMeetingDay('not-a-date', 'en-US')).toBe('not-a-date')
+    expect(formatOpenCordMeetingClock('bad-start', 'bad-end', 'en-US')).toBe(
+      'bad-start - bad-end',
+    )
+    expect(openCordMeetingChannelLabel({ channelId: 'general' }, channels)).toBe('# General')
+    expect(openCordMeetingChannelLabel({ channelId: 'standup' }, channels)).toBe('Voice Standup')
+    expect(openCordMeetingChannelLabel({ channelId: 'missing' }, channels)).toBe('Workspace')
   })
 })

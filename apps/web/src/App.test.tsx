@@ -1809,6 +1809,8 @@ describe('OpenCord web chat UI', () => {
     expect(screen.getByRole('heading', { name: 'Calendar' })).toBeInTheDocument()
     const upcomingMeetings = screen.getByLabelText('Upcoming meetings')
     expect(upcomingMeetings).toHaveTextContent('Roadmap Review')
+    expect(upcomingMeetings).toHaveTextContent('# General')
+    expect(upcomingMeetings).toHaveTextContent('Voice Office Hours')
     expect(upcomingMeetings).toHaveTextContent('Join URL')
 
     await userEvent.click(screen.getByRole('button', { name: 'New meeting' }))

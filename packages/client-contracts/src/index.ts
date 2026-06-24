@@ -149,6 +149,12 @@ export type OpenCordNotificationRouteTarget = Extract<
   { kind: 'server' | 'channel' | 'message' | 'meeting' }
 >
 
+export type OpenCordChannelLabelSource = {
+  id: string
+  kind: 'text' | 'voice'
+  name: string
+}
+
 const settingsPanels = [
   'account',
   'server-connections',
@@ -394,6 +400,70 @@ export function buildOpenCordRoutePath(target: OpenCordRouteTarget) {
   }
 }
 
+export function normalizeOpenCordChannelName(name: string) {
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9- ]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+}
+
+export function slugOpenCordTitle(title: string, fallback = 'meeting') {
+  return normalizeOpenCordChannelName(title) || fallback
+}
+
+export function displayOpenCordChannelName(name: string) {
+  return name
+    .split('-')
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ')
+}
+
+export function formatOpenCordMeetingDay(value: string, locale?: Intl.LocalesArgument) {
+  const date = parseOpenCordDate(value)
+  if (!date) {
+    return value
+  }
+
+  return new Intl.DateTimeFormat(locale, {
+    month: 'short',
+    day: 'numeric',
+  }).format(date)
+}
+
+export function formatOpenCordMeetingClock(
+  startsAt: string,
+  endsAt: string,
+  locale?: Intl.LocalesArgument,
+) {
+  const start = parseOpenCordDate(startsAt)
+  const end = parseOpenCordDate(endsAt)
+  if (!start || !end) {
+    return `${startsAt} - ${endsAt}`
+  }
+
+  const formatter = new Intl.DateTimeFormat(locale, {
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+  return `${formatter.format(start)} - ${formatter.format(end)}`
+}
+
+export function openCordMeetingChannelLabel(
+  meeting: { channelId?: string | null },
+  channels: OpenCordChannelLabelSource[],
+) {
+  const channel = channels.find((candidate) => candidate.id === meeting.channelId)
+  if (!channel) {
+    return 'Workspace'
+  }
+
+  return `${channel.kind === 'voice' ? 'Voice' : '#'} ${displayOpenCordChannelName(channel.name)}`
+}
+
 function appendTargetParams(params: URLSearchParams, target: OpenCordRouteTarget) {
   params.set('kind', target.kind)
   appendOptional(params, 'serverId', target.serverId)
@@ -442,6 +512,11 @@ function routeWithQuery(path: string, params: Record<string, string | undefined>
 
   const queryString = query.toString()
   return queryString ? `${path}?${queryString}` : path
+}
+
+function parseOpenCordDate(value: string) {
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? null : date
 }
 
 function optionalMeetingContext(

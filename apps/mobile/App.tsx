@@ -50,6 +50,10 @@ import {
 } from '@opencord/server-connections'
 import {
   buildOpenCordNotificationDeepLink,
+  formatOpenCordMeetingClock,
+  formatOpenCordMeetingDay,
+  openCordMeetingChannelLabel,
+  slugOpenCordTitle,
   type OpenCordNotificationRouteTarget,
   type OpenCordSettingsPanel,
 } from '@opencord/client-contracts'
@@ -2682,13 +2686,19 @@ function MobileMeetingPanel({
                 selectedMeeting?.id === meeting.id ? styles.selectedMeetingListCard : null,
               ]}
             >
-              <Text style={styles.meetingCardTime}>{formatMeetingDay(meeting.startsAt)}</Text>
+              <Text style={styles.meetingCardTime}>
+                {formatOpenCordMeetingDay(meeting.startsAt)}
+              </Text>
               <View style={styles.meetingCardBody}>
                 <Text numberOfLines={1} style={styles.meetingCardTitle}>
                   {meeting.title}
                 </Text>
-                <Text style={styles.subtle}>{formatMeetingClock(meeting.startsAt, meeting.endsAt)}</Text>
-                <Text style={styles.meetingChannelLabel}>{meetingChannelName(meeting, channels)}</Text>
+                <Text style={styles.subtle}>
+                  {formatOpenCordMeetingClock(meeting.startsAt, meeting.endsAt)}
+                </Text>
+                <Text style={styles.meetingChannelLabel}>
+                  {openCordMeetingChannelLabel(meeting, channels)}
+                </Text>
               </View>
             </Pressable>
           ))
@@ -2821,14 +2831,17 @@ function MobileMeetingDetail({
         <View style={styles.meetingDetailTitleBlock}>
           <Text style={styles.meetingDetailTitle}>{meeting.title}</Text>
           <Text style={styles.subtle}>
-            {formatMeetingDay(meeting.startsAt)} · {formatMeetingClock(meeting.startsAt, meeting.endsAt)}
+            {formatOpenCordMeetingDay(meeting.startsAt)} ·{' '}
+            {formatOpenCordMeetingClock(meeting.startsAt, meeting.endsAt)}
           </Text>
         </View>
         <Text style={[styles.meetingStatusPill, active ? styles.activeMeetingStatusPill : null]}>
           {active ? 'Joined' : meeting.status}
         </Text>
       </View>
-      <Text style={styles.meetingChannelLabel}>{meetingChannelName(meeting, channels)}</Text>
+      <Text style={styles.meetingChannelLabel}>
+        {openCordMeetingChannelLabel(meeting, channels)}
+      </Text>
       <View style={styles.meetingLinkBlock}>
         <Text style={styles.meetingSectionTitle}>Join URL</Text>
         <Text numberOfLines={2} style={styles.meetingCodeText}>{meeting.joinUrl}</Text>
@@ -4666,7 +4679,7 @@ function localMobileMeetingFromForm(
   },
 ): Meeting {
   const id = form.meetingId ?? `local-meeting-${Date.now()}`
-  const joinSlug = `mtg-${slugForMeetingTitle(title)}-${id.replace(/[^a-z0-9]+/gi, '')}`
+  const joinSlug = `mtg-${slugOpenCordTitle(title)}-${id.replace(/[^a-z0-9]+/gi, '')}`
 
   return {
     id,
@@ -4828,52 +4841,9 @@ function formatCompactDateTime(value: string) {
   }).format(date)
 }
 
-function formatMeetingDay(value: string) {
-  const date = parseMeetingDate(value)
-  if (!date) {
-    return value
-  }
-
-  return new Intl.DateTimeFormat(undefined, {
-    day: 'numeric',
-    month: 'short',
-  }).format(date)
-}
-
-function formatMeetingClock(startsAt: string, endsAt: string) {
-  const start = parseMeetingDate(startsAt)
-  const end = parseMeetingDate(endsAt)
-  if (!start || !end) {
-    return `${startsAt} - ${endsAt}`
-  }
-
-  const formatter = new Intl.DateTimeFormat(undefined, {
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-  return `${formatter.format(start)} - ${formatter.format(end)}`
-}
-
-function meetingChannelName(meeting: Meeting, channels: MobileChannel[]) {
-  const channel = channels.find((candidate) => candidate.id === meeting.channelId)
-  if (!channel) {
-    return 'Workspace'
-  }
-
-  return `${channel.kind === 'voice' ? 'Voice' : '#'} ${channel.name}`
-}
-
 function parseMeetingDate(value: string) {
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? null : date
-}
-
-function slugForMeetingTitle(title: string) {
-  return title
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/(^-|-$)/g, '') || 'meeting'
 }
 
 async function ensureMobileWorkspaceChannels(

@@ -26,6 +26,7 @@
   },
   "dependencies": {
     "@opencord/api-client": "workspace:*",
+    "@opencord/media": "workspace:*",
     "@opencord/realtime": "workspace:*",
     "@opencord/server-connections": "workspace:*",
     "@tanstack/react-query": "^5.101.0",

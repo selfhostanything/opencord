@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import {
   createMainWindowOptions,
   createSecureWebPreferences,
+  desktopMediaAutomationConfig,
   desktopRuntimeInfo,
   resolveRendererEntry,
 } from './config'
@@ -72,6 +73,31 @@ describe('desktop shell config', () => {
         electron: '39.0.0',
         node: '26.0.0',
       },
+    })
+  })
+
+  it('keeps desktop media automation disabled unless explicitly requested', () => {
+    expect(desktopMediaAutomationConfig({})).toEqual({
+      commandLineSwitches: [],
+      enabled: false,
+      preferredSourceName: null,
+    })
+  })
+
+  it('enables deterministic e2e media permissions and capture flags', () => {
+    expect(
+      desktopMediaAutomationConfig({
+        OPENCORD_DESKTOP_E2E_MEDIA: '1',
+        OPENCORD_DESKTOP_E2E_SCREEN_SOURCE: ' Entire Screen ',
+      }),
+    ).toEqual({
+      commandLineSwitches: [
+        { name: 'use-fake-ui-for-media-stream' },
+        { name: 'use-fake-device-for-media-stream' },
+        { name: 'autoplay-policy', value: 'no-user-gesture-required' },
+      ],
+      enabled: true,
+      preferredSourceName: 'Entire Screen',
     })
   })
 })

@@ -1,7 +1,12 @@
 import path from 'node:path'
-import { app, BrowserWindow, Notification, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, Notification, desktopCapturer, ipcMain, session, shell } from 'electron'
 
-import { createMainWindowOptions, resolveRendererEntry } from './config'
+import {
+  createMainWindowOptions,
+  desktopMediaAutomationConfig,
+  resolveRendererEntry,
+  type DesktopMediaAutomationConfig,
+} from './config'
 import {
   MESSAGE_NOTIFICATION_CHANNEL,
   buildMessageNotification,
@@ -13,8 +18,11 @@ const appRoot = path.resolve(__dirname, '..')
 const repoRoot = path.resolve(appRoot, '../..')
 const preloadPath = path.join(__dirname, 'preload.js')
 const smokeMode = process.argv.includes('--smoke')
+const mediaAutomationConfig = desktopMediaAutomationConfig()
 
 let mainWindow: BrowserWindow | null = null
+
+applyDesktopMediaAutomationCommandLine(mediaAutomationConfig)
 
 ipcMain.handle(MESSAGE_NOTIFICATION_CHANNEL, (_event, payload: unknown) => {
   if (!isMessageNotificationPayload(payload) || !Notification.isSupported()) {
@@ -81,6 +89,7 @@ function isRendererNavigationAllowed(url: string) {
 }
 
 app.whenReady().then(async () => {
+  configureDesktopMediaAutomation(mediaAutomationConfig)
   await createWindow()
 
   app.on('activate', () => {
@@ -96,3 +105,57 @@ app.on('window-all-closed', () => {
     app.quit()
   }
 })
+
+function applyDesktopMediaAutomationCommandLine(config: DesktopMediaAutomationConfig) {
+  if (!config.enabled) {
+    return
+  }
+
+  for (const commandLineSwitch of config.commandLineSwitches) {
+    if (commandLineSwitch.value) {
+      app.commandLine.appendSwitch(commandLineSwitch.name, commandLineSwitch.value)
+    } else {
+      app.commandLine.appendSwitch(commandLineSwitch.name)
+    }
+  }
+}
+
+function configureDesktopMediaAutomation(config: DesktopMediaAutomationConfig) {
+  if (!config.enabled) {
+    return
+  }
+
+  session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
+    callback(permission === 'media')
+  })
+  session.defaultSession.setPermissionCheckHandler((_webContents, permission) =>
+    permission === 'media',
+  )
+  session.defaultSession.setDisplayMediaRequestHandler((_request, callback) => {
+    void selectDesktopCaptureSource(config).then((source) => {
+      if (!source) {
+        callback({})
+        return
+      }
+
+      console.log(`opencord-desktop-e2e-display-source:${source.id}:${source.name}`)
+      callback({ video: source })
+    })
+  }, { useSystemPicker: false })
+  console.log('opencord-desktop-media-e2e-ready')
+}
+
+async function selectDesktopCaptureSource(config: DesktopMediaAutomationConfig) {
+  const sources = await desktopCapturer.getSources({ types: ['screen', 'window'] })
+  const preferredSourceName = config.preferredSourceName?.toLowerCase()
+  if (preferredSourceName) {
+    const preferredSource = sources.find((source) =>
+      source.name.toLowerCase().includes(preferredSourceName),
+    )
+    if (preferredSource) {
+      return preferredSource
+    }
+  }
+
+  return sources.find((source) => source.id.startsWith('screen:')) ?? sources[0] ?? null
+}

@@ -15,3 +15,9 @@ apps/mobile/android/app/.cxx/
 apps/mobile/android/build/
 apps/mobile/android/app/build/
 apps/mobile/android/local.properties
+apps/mobile/android/app/src/main/assets/
+apps/mobile/android/app/src/main/res/drawable-mdpi/
+apps/mobile/android/app/src/main/res/raw/keep.xml
+apps/mobile/apps/
+apps/mobile/ios/Pods/
+apps/mobile/ios/build/

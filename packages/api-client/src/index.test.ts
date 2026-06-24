@@ -650,6 +650,7 @@ describe('OpenCord API client', () => {
         organizationId: '01973f83-f22a-73ba-ae76-5a045c52fc96',
         spaceId: '01973f83-f22a-73ba-ae76-5a045c52fc95',
         channelId: '01973f83-f22a-73ba-ae76-5a045c52fc98',
+        meetingId: null,
         participantIdentity: '01973f83-f22a-73ba-ae76-5a045c52fc97',
         participantToken: 'livekit.jwt',
         expiresAt: '2026-06-23T03:30:00.000Z',
@@ -1230,6 +1231,84 @@ describe('OpenCord API client', () => {
           Accept: 'application/json',
           Authorization: 'Bearer session-token',
         },
+      },
+    )
+  })
+
+  it('creates a meeting media token through the typed API', async () => {
+    const fetchMock = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>()
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        media: {
+          provider: 'livekit',
+          server_url: 'ws://localhost:7880',
+          region: 'local',
+          room_type: 'meeting_room',
+          room_name: 'opencord_meeting_01973f83f22a73baae765a045c52fca1',
+          organization_id: '01973f83-f22a-73ba-ae76-5a045c52fc96',
+          space_id: '01973f83-f22a-73ba-ae76-5a045c52fc95',
+          channel_id: '01973f83-f22a-73ba-ae76-5a045c52fc98',
+          meeting_id: '01973f83-f22a-73ba-ae76-5a045c52fca1',
+          participant_identity: '01973f83-f22a-73ba-ae76-5a045c52fc97',
+          participant_token: 'meeting.livekit.jwt',
+          expires_at: '2026-06-24T00:10:00Z',
+          grants: {
+            can_publish_audio: true,
+            can_publish_video: true,
+            can_publish_screen: true,
+            can_subscribe: true,
+          },
+        },
+      }),
+    )
+    const client = createOpenCordApiClient({
+      baseUrl: 'https://chat.example.com',
+      fetch: fetchMock,
+      sessionToken: 'session-token',
+    })
+
+    await expect(
+      client.createMeetingMediaToken('01973f83-f22a-73ba-ae76-5a045c52fca1', {
+        canPublishAudio: true,
+        canPublishVideo: true,
+        canPublishScreen: true,
+        canSubscribe: true,
+      }),
+    ).resolves.toEqual({
+      provider: 'livekit',
+      serverUrl: 'ws://localhost:7880',
+      region: 'local',
+      roomType: 'meeting_room',
+      roomName: 'opencord_meeting_01973f83f22a73baae765a045c52fca1',
+      organizationId: '01973f83-f22a-73ba-ae76-5a045c52fc96',
+      spaceId: '01973f83-f22a-73ba-ae76-5a045c52fc95',
+      channelId: '01973f83-f22a-73ba-ae76-5a045c52fc98',
+      meetingId: '01973f83-f22a-73ba-ae76-5a045c52fca1',
+      participantIdentity: '01973f83-f22a-73ba-ae76-5a045c52fc97',
+      participantToken: 'meeting.livekit.jwt',
+      expiresAt: '2026-06-24T00:10:00Z',
+      grants: {
+        canPublishAudio: true,
+        canPublishVideo: true,
+        canPublishScreen: true,
+        canSubscribe: true,
+      },
+    })
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://chat.example.com/meetings/01973f83-f22a-73ba-ae76-5a045c52fca1/media/token',
+      {
+        body: JSON.stringify({
+          can_publish_audio: true,
+          can_publish_video: true,
+          can_publish_screen: true,
+          can_subscribe: true,
+        }),
+        headers: {
+          Accept: 'application/json',
+          Authorization: 'Bearer session-token',
+          'Content-Type': 'application/json',
+        },
+        method: 'POST',
       },
     )
   })

@@ -1,10 +1,19 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { createMemoryHistory } from '@tanstack/react-router'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import App from './App'
 import { createAppRouter } from './app/router'
+
+const mediaMocks = vi.hoisted(() => ({
+  connectLiveKitVoice: vi.fn(),
+  lastVoiceSession: null as ReturnType<typeof createMockVoiceSession> | null,
+}))
+
+vi.mock('@opencord/media', () => ({
+  connectLiveKitVoice: mediaMocks.connectLiveKitVoice,
+}))
 
 describe('OpenCord web chat UI', () => {
   const fetchMock = vi.fn()
@@ -16,9 +25,14 @@ describe('OpenCord web chat UI', () => {
       json: async () => ({ status: 'ok', version: 'test-version' }),
     })
     vi.stubGlobal('fetch', fetchMock)
+    mediaMocks.connectLiveKitVoice.mockReset()
+    mediaMocks.lastVoiceSession = createMockVoiceSession()
+    mediaMocks.connectLiveKitVoice.mockResolvedValue(mediaMocks.lastVoiceSession)
   })
 
   afterEach(() => {
+    delete (window as Window & { __OPENCORD_MEDIA_RTC_CONFIG__?: RTCConfiguration })
+      .__OPENCORD_MEDIA_RTC_CONFIG__
     window.localStorage?.clear?.()
     vi.unstubAllGlobals()
   })
@@ -43,6 +57,35 @@ describe('OpenCord web chat UI', () => {
     expect(fetchMock).toHaveBeenCalledWith('http://localhost:8080/healthz', {
       headers: { Accept: 'application/json' },
     })
+  })
+
+  it('opens quiet Voice & Video settings from the user footer', async () => {
+    vi.stubGlobal('openCordDesktop', {
+      platform: 'darwin',
+      versions: {
+        chrome: 'test-chrome',
+        electron: 'test-electron',
+        node: 'test-node',
+      },
+    })
+
+    render(<App />)
+
+    await userEvent.click(screen.getByRole('button', { name: 'User settings' }))
+
+    const voiceVideoSettings = screen.getByRole('region', { name: 'Voice & Video settings' })
+    expect(within(voiceVideoSettings).getByRole('heading', { name: 'Voice & Video' }))
+      .toBeInTheDocument()
+    expect(voiceVideoSettings).toHaveTextContent('macOS desktop')
+    expect(voiceVideoSettings).toHaveTextContent('Microphone')
+    expect(voiceVideoSettings).toHaveTextContent('Ask before join')
+    expect(voiceVideoSettings).toHaveTextContent('Screen share')
+    expect(voiceVideoSettings).toHaveTextContent('macOS System Settings')
+    expect(voiceVideoSettings).toHaveTextContent('Speaker output')
+
+    await userEvent.click(within(voiceVideoSettings).getByRole('button', { name: 'Close user settings' }))
+
+    expect(screen.queryByRole('region', { name: 'Voice & Video settings' })).not.toBeInTheDocument()
   })
 
   it('bootstraps a local alpha workspace and sends messages through real API calls', async () => {
@@ -189,6 +232,7 @@ describe('OpenCord web chat UI', () => {
     const textChannelId = '019ef679-3166-7c33-9e32-2c8350a31729'
     const voiceChannelId = '019ef679-3169-74e1-aedd-9365f9ff198d'
     const ownerUserId = '019ef679-303f-72f2-83bd-4501222533f2'
+    let voiceJoinRequests = 0
 
     fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
@@ -395,6 +439,39 @@ describe('OpenCord web chat UI', () => {
           }),
         )
       }
+      if (url.endsWith(`/voice/channels/${voiceChannelId}/join`) && init?.method === 'POST') {
+        voiceJoinRequests += 1
+        return new Response(
+          JSON.stringify({
+            voice: {
+              channel_id: voiceChannelId,
+              user_id: ownerUserId,
+              self_mute: false,
+              self_deaf: false,
+            },
+            media: {
+              provider: 'livekit',
+              server_url: 'ws://localhost:7880',
+              region: 'local',
+              room_type: 'voice_channel',
+              room_name: `opencord_voice_${voiceChannelId.replaceAll('-', '')}`,
+              organization_id: organizationId,
+              space_id: spaceId,
+              channel_id: voiceChannelId,
+              participant_identity: ownerUserId,
+              participant_token: 'livekit.jwt',
+              expires_at: '2026-06-24T00:10:00Z',
+                grants: {
+                  can_publish_audio: true,
+                  can_publish_video: false,
+                  can_publish_screen: true,
+                  can_subscribe: true,
+                },
+            },
+          }),
+          { status: 201 },
+        )
+      }
 
       throw new Error(`Unexpected fetch ${url}`)
     })
@@ -420,6 +497,95 @@ describe('OpenCord web chat UI', () => {
     expect(timeline).toHaveTextContent('87 B')
     expect(screen.getByRole('button', { name: 'Join Voice: Voice Lounge' })).toBeInTheDocument()
 
+    const rtcConfig: RTCConfiguration = {
+      iceServers: [
+        {
+          credential: 'opencord-turn-password',
+          urls: ['turn:localhost:3478?transport=udp'],
+          username: 'opencord',
+        },
+      ],
+      iceTransportPolicy: 'relay',
+    }
+    ;(window as Window & { __OPENCORD_MEDIA_RTC_CONFIG__?: RTCConfiguration })
+      .__OPENCORD_MEDIA_RTC_CONFIG__ = rtcConfig
+
+    await userEvent.click(screen.getByRole('button', { name: 'Join Voice: Voice Lounge' }))
+
+    await waitFor(() => {
+      expect(voiceJoinRequests).toBe(1)
+    })
+    expect(fetchMock).toHaveBeenCalledWith(
+      `http://localhost:8080/voice/channels/${voiceChannelId}/join`,
+      expect.objectContaining({
+        body: JSON.stringify({ self_mute: false, self_deaf: false }),
+        method: 'POST',
+      }),
+    )
+    expect(mediaMocks.connectLiveKitVoice).toHaveBeenCalledWith(
+      expect.objectContaining({
+        serverUrl: 'ws://localhost:7880',
+        participantToken: 'livekit.jwt',
+        roomName: `opencord_voice_${voiceChannelId.replaceAll('-', '')}`,
+        participantIdentity: ownerUserId,
+        grants: {
+          canPublishAudio: true,
+          canPublishVideo: false,
+          canPublishScreen: true,
+          canSubscribe: true,
+        },
+        selfMute: false,
+        selfDeaf: false,
+        rtcConfig,
+      }),
+    )
+    expect(screen.getByLabelText('Voice controls')).toHaveTextContent('Voice Lounge')
+
+    const screenShareStop = vi.fn()
+    let screenShareEndedListener: (() => void) | undefined
+    const screenShare = stubScreenShare({
+      track: createScreenShareTrack({
+        onEnded(listener) {
+          screenShareEndedListener = listener
+        },
+        stop: screenShareStop,
+      }),
+    })
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Share screen' })).toBeEnabled()
+    })
+    await userEvent.click(screen.getByRole('button', { name: 'Share screen' }))
+    await waitFor(() => {
+      expect(mediaMocks.lastVoiceSession?.publishScreenShare).toHaveBeenCalled()
+    })
+    expect(mediaMocks.lastVoiceSession?.publishScreenShare).toHaveBeenCalledWith(
+      expect.objectContaining({
+        getVideoTracks: expect.any(Function),
+      }),
+    )
+    expect(screen.getByLabelText('Voice controls')).toHaveTextContent('Screen sharing')
+    expect(screenShare.getDisplayMedia).toHaveBeenCalledWith({ audio: false, video: true })
+
+    await act(async () => {
+      screenShareEndedListener?.()
+    })
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Share screen' })).toBeInTheDocument()
+    })
+    expect(mediaMocks.lastVoiceSession?.stopScreenShare).toHaveBeenCalledTimes(1)
+    expect(screenShareStop).not.toHaveBeenCalled()
+
+    stubScreenShare({
+      error: new DOMException('Permission denied', 'NotAllowedError'),
+    })
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Share screen' })).toBeEnabled()
+    })
+    await userEvent.click(screen.getByRole('button', { name: 'Share screen' }))
+    await waitFor(() => {
+      expect(screen.getByLabelText('Voice controls')).toHaveTextContent('Screen share blocked')
+    })
+
     await userEvent.click(screen.getByRole('button', { name: 'Calendar' }))
 
     const upcomingMeetings = screen.getByLabelText('Upcoming meetings')
@@ -438,6 +604,234 @@ describe('OpenCord web chat UI', () => {
         )
       }),
     ).toBe(false)
+  })
+
+  it('disconnects quiet voice media when realtime revokes connect permission', async () => {
+    const organizationId = '019ef679-3158-7830-81f5-4b02336e9fa1'
+    const spaceId = '019ef679-3160-7813-b9aa-10795e7904d8'
+    const textChannelId = '019ef679-3166-7c33-9e32-2c8350a31729'
+    const voiceChannelId = '019ef679-3169-74e1-aedd-9365f9ff198d'
+    const ownerUserId = '019ef679-303f-72f2-83bd-4501222533f2'
+    const realtimeSockets: TestRealtimeSocket[] = []
+    vi.stubGlobal(
+      'WebSocket',
+      class extends TestRealtimeSocket {
+        constructor(url: string) {
+          super(url)
+          realtimeSockets.push(this)
+        }
+      },
+    )
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.endsWith('/healthz')) {
+        return new Response(JSON.stringify({ status: 'ok', version: 'test-version' }))
+      }
+      if (url.endsWith('/auth/register')) {
+        return new Response(
+          JSON.stringify({
+            user: {
+              id: ownerUserId,
+              email: 'owner@opencord.local',
+              display_name: 'OpenCord Owner',
+            },
+            session: { token: 'seed-session-token' },
+          }),
+          { status: 201 },
+        )
+      }
+      if (url.endsWith('/organizations') && init?.method === undefined) {
+        return new Response(
+          JSON.stringify({
+            organizations: [
+              {
+                id: organizationId,
+                name: 'OpenCord Local Alpha',
+                slug: 'opencord-local-alpha',
+                plan: 'free',
+                deployment_mode: 'self_hosted',
+                primary_region: 'local',
+                created_at: '2026-06-24T00:00:00Z',
+                role: 'owner',
+              },
+            ],
+          }),
+        )
+      }
+      if (url.endsWith(`/organizations/${organizationId}/spaces`) && init?.method === undefined) {
+        return new Response(
+          JSON.stringify({
+            spaces: [
+              {
+                id: spaceId,
+                organization_id: organizationId,
+                name: 'Local Alpha',
+                slug: 'local-alpha',
+                created_at: '2026-06-24T00:01:00Z',
+                role: 'owner',
+              },
+            ],
+          }),
+        )
+      }
+      if (url.endsWith(`/spaces/${spaceId}/channels`) && init?.method === undefined) {
+        return new Response(
+          JSON.stringify({
+            channels: [
+              {
+                id: textChannelId,
+                organization_id: organizationId,
+                space_id: spaceId,
+                kind: 'text',
+                name: 'general',
+                slug: 'general',
+                topic: 'Local alpha chat.',
+                position: 0,
+                is_private: false,
+                archived_at: null,
+                created_at: '2026-06-24T00:02:00Z',
+              },
+              {
+                id: voiceChannelId,
+                organization_id: organizationId,
+                space_id: spaceId,
+                kind: 'voice',
+                name: 'Voice Lounge',
+                slug: 'voice-lounge',
+                topic: 'Local alpha voice.',
+                position: 1,
+                is_private: false,
+                archived_at: null,
+                created_at: '2026-06-24T00:03:00Z',
+              },
+            ],
+          }),
+        )
+      }
+      if (url.endsWith(`/channels/${textChannelId}/messages`) && init?.method === undefined) {
+        return new Response(JSON.stringify({ messages: [] }))
+      }
+      if (url.endsWith(`/organizations/${organizationId}/meetings`) && init?.method === undefined) {
+        return new Response(JSON.stringify({ meetings: [] }))
+      }
+      if (url.endsWith(`/voice/channels/${voiceChannelId}/join`) && init?.method === 'POST') {
+        return new Response(
+          JSON.stringify({
+            voice: {
+              channel_id: voiceChannelId,
+              user_id: ownerUserId,
+              self_mute: false,
+              self_deaf: false,
+            },
+            media: {
+              provider: 'livekit',
+              server_url: 'ws://localhost:7880',
+              region: 'local',
+              room_type: 'voice_channel',
+              room_name: `opencord_voice_${voiceChannelId.replaceAll('-', '')}`,
+              organization_id: organizationId,
+              space_id: spaceId,
+              channel_id: voiceChannelId,
+              participant_identity: ownerUserId,
+              participant_token: 'livekit.jwt',
+              expires_at: '2026-06-24T00:10:00Z',
+              grants: {
+                can_publish_audio: true,
+                can_publish_video: false,
+                can_publish_screen: true,
+                can_subscribe: true,
+              },
+            },
+          }),
+          { status: 201 },
+        )
+      }
+
+      throw new Error(`Unexpected fetch ${url}`)
+    })
+
+    render(<App />)
+
+    await userEvent.clear(screen.getByLabelText('Local alpha email'))
+    await userEvent.type(screen.getByLabelText('Local alpha email'), 'owner@opencord.local')
+    await userEvent.clear(screen.getByLabelText('Local alpha display name'))
+    await userEvent.type(screen.getByLabelText('Local alpha display name'), 'OpenCord Owner')
+    await userEvent.type(screen.getByLabelText('Local alpha password'), 'correct horse battery staple')
+    await userEvent.click(screen.getByRole('button', { name: 'Start local alpha' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Join Voice: Voice Lounge' }))
+
+    await waitFor(() => {
+      expect(realtimeSockets).toHaveLength(1)
+    })
+    const screenShareStop = vi.fn()
+    stubScreenShare({
+      track: createScreenShareTrack({ stop: screenShareStop }),
+    })
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Share screen' })).toBeEnabled()
+    })
+    await userEvent.click(screen.getByRole('button', { name: 'Share screen' }))
+    await waitFor(() => {
+      expect(mediaMocks.lastVoiceSession?.publishScreenShare).toHaveBeenCalled()
+    })
+    realtimeSockets[0].emit({
+      id: 'evt_media_restrict_publish',
+      type: 'media.permission_revoked',
+      organization_id: organizationId,
+      scope: {
+        space_id: spaceId,
+        channel_id: voiceChannelId,
+      },
+      occurred_at: '2026-06-24T00:04:00.000Z',
+      data: {
+        channel_id: voiceChannelId,
+        target_kind: 'member',
+        target_id: ownerUserId,
+        action: 'restrict_publish',
+        grants: {
+          can_publish_audio: true,
+          can_publish_screen: false,
+          can_subscribe: true,
+        },
+      },
+    })
+
+    await waitFor(() => {
+      expect(mediaMocks.lastVoiceSession?.stopScreenShare).toHaveBeenCalled()
+    })
+    expect(screenShareStop).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Voice permissions changed. Screen sharing stopped.',
+    )
+    realtimeSockets[0].emit({
+      id: 'evt_media_revoke',
+      type: 'media.permission_revoked',
+      organization_id: organizationId,
+      scope: {
+        space_id: spaceId,
+        channel_id: voiceChannelId,
+      },
+      occurred_at: '2026-06-24T00:04:00.000Z',
+      data: {
+        channel_id: voiceChannelId,
+        target_kind: 'member',
+        target_id: ownerUserId,
+        action: 'disconnect',
+        grants: {
+          can_publish_audio: false,
+          can_publish_screen: false,
+          can_subscribe: true,
+        },
+      },
+    })
+
+    await waitFor(() => {
+      expect(mediaMocks.lastVoiceSession?.disconnect).toHaveBeenCalled()
+    })
+    expect(screen.getByLabelText('Voice controls')).toHaveTextContent('Not connected')
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Voice access changed. You were removed from the channel.',
+    )
   })
 
   it('renders typed workspace routes for channel, calendar, developer, and meeting surfaces', async () => {
@@ -1101,6 +1495,239 @@ describe('OpenCord web chat UI', () => {
     expect(screen.getByRole('heading', { name: 'Calendar' })).toBeInTheDocument()
   })
 
+  it('joins a server-backed meeting room with LiveKit media controls', async () => {
+    const organizationId = '01973f83-f22a-73ba-ae76-5a045c52fc91'
+    const spaceId = '01973f83-f22a-73ba-ae76-5a045c52fc92'
+    const textChannelId = '01973f83-f22a-73ba-ae76-5a045c52fc93'
+    const voiceChannelId = '01973f83-f22a-73ba-ae76-5a045c52fc94'
+    const ownerUserId = '01973f83-f22a-73ba-ae76-5a045c52fc97'
+    const meetingId = '019ef679-3187-7331-a2bd-aa8b5ade1e57'
+    let meetingMediaRequests = 0
+
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.endsWith('/healthz')) {
+        return new Response(JSON.stringify({ version: 'test-version' }))
+      }
+      if (url.endsWith('/auth/register') && init?.method === 'POST') {
+        return new Response(
+          JSON.stringify({
+            user: {
+              id: ownerUserId,
+              email: 'owner@opencord.local',
+              display_name: 'OpenCord Owner',
+            },
+            session: { token: 'seed-session-token' },
+          }),
+          { status: 201 },
+        )
+      }
+      if (url.endsWith('/organizations') && init?.method === undefined) {
+        return new Response(
+          JSON.stringify({
+            organizations: [
+              {
+                id: organizationId,
+                name: 'OpenCord Local',
+                slug: 'opencord-local',
+                plan: 'self_hosted',
+                deployment_mode: 'self_hosted',
+                primary_region: 'local',
+                created_at: '2026-06-24T00:00:00Z',
+                role: 'owner',
+              },
+            ],
+          }),
+        )
+      }
+      if (url.endsWith(`/organizations/${organizationId}/spaces`) && init?.method === undefined) {
+        return new Response(
+          JSON.stringify({
+            spaces: [
+              {
+                id: spaceId,
+                organization_id: organizationId,
+                name: 'OpenCord',
+                slug: 'opencord',
+                created_at: '2026-06-24T00:01:00Z',
+                role: 'owner',
+              },
+            ],
+          }),
+        )
+      }
+      if (url.endsWith(`/spaces/${spaceId}/channels`) && init?.method === undefined) {
+        return new Response(
+          JSON.stringify({
+            channels: [
+              {
+                id: textChannelId,
+                organization_id: organizationId,
+                space_id: spaceId,
+                kind: 'text',
+                name: 'general',
+                slug: 'general',
+                topic: 'Local alpha chat',
+                position: 0,
+                is_private: false,
+                archived_at: null,
+                created_at: '2026-06-24T00:02:00Z',
+              },
+              {
+                id: voiceChannelId,
+                organization_id: organizationId,
+                space_id: spaceId,
+                kind: 'voice',
+                name: 'Voice Lounge',
+                slug: 'voice-lounge',
+                topic: null,
+                position: 1,
+                is_private: false,
+                archived_at: null,
+                created_at: '2026-06-24T00:03:00Z',
+              },
+            ],
+          }),
+        )
+      }
+      if (url.endsWith(`/channels/${textChannelId}/messages`) && init?.method === undefined) {
+        return new Response(JSON.stringify({ messages: [] }))
+      }
+      if (url.endsWith(`/organizations/${organizationId}/meetings`) && init?.method === undefined) {
+        return new Response(
+          JSON.stringify({
+            meetings: [
+              {
+                id: meetingId,
+                organization_id: organizationId,
+                space_id: spaceId,
+                channel_id: textChannelId,
+                created_by_user_id: ownerUserId,
+                title: 'OpenCord Local Alpha Standup',
+                description: 'Local alpha meeting fixture.',
+                status: 'scheduled',
+                starts_at: '2099-01-09T09:00:00Z',
+                ends_at: '2099-01-09T09:30:00Z',
+                timezone: 'UTC',
+                join_slug: 'mtg-019ef67931877331a2bdaa8b5ade1e57',
+                join_url:
+                  'http://localhost:8080/join/mtg-019ef67931877331a2bdaa8b5ade1e57',
+                cancelled_at: null,
+                attendees: [],
+                reminders: [],
+              },
+            ],
+          }),
+        )
+      }
+      if (url.endsWith(`/meetings/${meetingId}/media/token`) && init?.method === 'POST') {
+        meetingMediaRequests += 1
+        return new Response(
+          JSON.stringify({
+            media: {
+              provider: 'livekit',
+              server_url: 'ws://localhost:7880',
+              region: 'local',
+              room_type: 'meeting_room',
+              room_name: `opencord_meeting_${meetingId.replaceAll('-', '')}`,
+              organization_id: organizationId,
+              space_id: spaceId,
+              channel_id: textChannelId,
+              meeting_id: meetingId,
+              participant_identity: ownerUserId,
+              participant_token: 'meeting.livekit.jwt',
+              expires_at: '2026-06-24T00:10:00Z',
+              grants: {
+                can_publish_audio: true,
+                can_publish_video: true,
+                can_publish_screen: true,
+                can_subscribe: true,
+              },
+            },
+          }),
+          { status: 201 },
+        )
+      }
+
+      throw new Error(`Unexpected fetch ${url}`)
+    })
+
+    render(<App />)
+
+    await userEvent.clear(screen.getByLabelText('Local alpha email'))
+    await userEvent.type(screen.getByLabelText('Local alpha email'), 'owner@opencord.local')
+    await userEvent.clear(screen.getByLabelText('Local alpha display name'))
+    await userEvent.type(screen.getByLabelText('Local alpha display name'), 'OpenCord Owner')
+    await userEvent.type(screen.getByLabelText('Local alpha password'), 'correct horse battery staple')
+    await userEvent.click(screen.getByRole('button', { name: 'Start local alpha' }))
+
+    await screen.findByRole('button', { name: 'Calendar' })
+    await userEvent.click(screen.getByRole('button', { name: 'Calendar' }))
+    const meeting = within(screen.getByLabelText('Upcoming meetings'))
+      .getByText('OpenCord Local Alpha Standup')
+      .closest('article')
+    expect(meeting).not.toBeNull()
+
+    await userEvent.click(
+      within(meeting!).getByRole('button', {
+        name: 'Join meeting OpenCord Local Alpha Standup',
+      }),
+    )
+
+    await waitFor(() => {
+      expect(meetingMediaRequests).toBe(1)
+    })
+    expect(fetchMock).toHaveBeenCalledWith(
+      `http://localhost:8080/meetings/${meetingId}/media/token`,
+      expect.objectContaining({
+        body: JSON.stringify({
+          can_publish_audio: true,
+          can_publish_video: true,
+          can_publish_screen: true,
+          can_subscribe: true,
+        }),
+        method: 'POST',
+      }),
+    )
+    expect(mediaMocks.connectLiveKitVoice).toHaveBeenCalledWith(
+      expect.objectContaining({
+        serverUrl: 'ws://localhost:7880',
+        participantToken: 'meeting.livekit.jwt',
+        roomName: `opencord_meeting_${meetingId.replaceAll('-', '')}`,
+        participantIdentity: ownerUserId,
+        grants: {
+          canPublishAudio: true,
+          canPublishVideo: true,
+          canPublishScreen: true,
+          canSubscribe: true,
+        },
+        selfMute: false,
+        selfDeaf: false,
+      }),
+    )
+
+    const meetingRoom = screen.getByRole('region', { name: 'Meeting room' })
+    expect(meetingRoom).toHaveTextContent('Media room connected')
+    await userEvent.click(
+      within(meetingRoom).getByRole('button', { name: 'Mute meeting microphone' }),
+    )
+    expect(mediaMocks.lastVoiceSession?.setMuted).toHaveBeenCalledWith(true)
+
+    const screenShareStop = vi.fn()
+    const screenShare = stubScreenShare({
+      track: createScreenShareTrack({ stop: screenShareStop }),
+    })
+    await userEvent.click(within(meetingRoom).getByRole('button', { name: 'Share meeting screen' }))
+    await waitFor(() => {
+      expect(mediaMocks.lastVoiceSession?.publishScreenShare).toHaveBeenCalled()
+    })
+    expect(screenShare.getDisplayMedia).toHaveBeenCalledWith({ audio: false, video: true })
+
+    await userEvent.click(within(meetingRoom).getByRole('button', { name: 'Leave meeting' }))
+    expect(mediaMocks.lastVoiceSession?.disconnect).toHaveBeenCalled()
+    expect(screenShareStop).toHaveBeenCalledTimes(1)
+  })
+
   it('shows voice channels with connected users and local controls', async () => {
     render(<App />)
 
@@ -1145,63 +1772,16 @@ describe('OpenCord web chat UI', () => {
     expect(screen.getByRole('button', { name: 'Join Voice: Standup' })).toBeInTheDocument()
   })
 
-  it('starts and stops a mocked screen share from the voice controls', async () => {
-    const stop = vi.fn()
-    const screenShare = stubScreenShare({
-      track: createScreenShareTrack({ stop }),
-    })
+  it('keeps screen sharing disabled without an active media session', async () => {
+    const screenShare = stubScreenShare({})
     render(<App />)
 
+    expect(screen.getByRole('button', { name: 'Share screen' })).toBeDisabled()
     await userEvent.click(screen.getByRole('button', { name: 'Share screen' }))
 
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Stop screen share' })).toBeInTheDocument()
-    })
-    expect(screen.getByLabelText('Voice controls')).toHaveTextContent('Screen sharing')
-    expect(screenShare.getDisplayMedia).toHaveBeenCalledWith({ audio: false, video: true })
-
-    await userEvent.click(screen.getByRole('button', { name: 'Stop screen share' }))
-
-    expect(stop).toHaveBeenCalledTimes(1)
     expect(screen.getByRole('button', { name: 'Share screen' })).toBeInTheDocument()
-  })
-
-  it('shows a screen share failure when capture permission is denied', async () => {
-    stubScreenShare({
-      error: new DOMException('Permission denied', 'NotAllowedError'),
-    })
-    render(<App />)
-
-    await userEvent.click(screen.getByRole('button', { name: 'Share screen' }))
-
-    await waitFor(() => {
-      expect(screen.getByLabelText('Voice controls')).toHaveTextContent('Screen share blocked')
-    })
-    expect(screen.getByRole('button', { name: 'Share screen' })).toBeInTheDocument()
-  })
-
-  it('clears screen share state when the captured track ends externally', async () => {
-    let endedListener: (() => void) | undefined
-    stubScreenShare({
-      track: createScreenShareTrack({
-        onEnded(listener) {
-          endedListener = listener
-        },
-      }),
-    })
-    render(<App />)
-
-    await userEvent.click(screen.getByRole('button', { name: 'Share screen' }))
-
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Stop screen share' })).toBeInTheDocument()
-    })
-    endedListener?.()
-
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Share screen' })).toBeInTheDocument()
-    })
-    expect(screen.getByLabelText('Voice controls')).not.toHaveTextContent('Screen sharing')
+    expect(screenShare.getDisplayMedia).not.toHaveBeenCalled()
+    expect(mediaMocks.lastVoiceSession?.publishScreenShare).not.toHaveBeenCalled()
   })
 
   it('adds, switches, removes, and persists multiple server connections', async () => {
@@ -1282,4 +1862,70 @@ function createScreenShareTrack({
     kind: 'video',
     stop,
   } as unknown as MediaStreamTrack
+}
+
+class TestRealtimeSocket {
+  readonly url: string
+  readyState = 1
+  sent: string[] = []
+  onopen: (() => void) | null = null
+  onmessage: ((event: { data: string }) => void) | null = null
+  onclose: (() => void) | null = null
+  onerror: (() => void) | null = null
+
+  constructor(url: string) {
+    this.url = url
+    queueMicrotask(() => this.onopen?.())
+  }
+
+  send(data: string) {
+    this.sent.push(data)
+  }
+
+  close() {
+    this.readyState = 3
+    this.onclose?.()
+  }
+
+  emit(event: unknown) {
+    this.onmessage?.({ data: JSON.stringify(event) })
+  }
+}
+
+function createMockVoiceSession() {
+  let localScreenSharePublications: Array<{
+    kind: string
+    muted: boolean
+    sid: string
+    source: string
+  }> = []
+
+  return {
+    roomName: 'opencord_voice_test',
+    participantIdentity: 'test-user',
+    disconnect: vi.fn(),
+    publishScreenShare: vi.fn(async () => {
+      localScreenSharePublications = [
+        {
+          sid: 'TR_screen_test',
+          kind: 'video',
+          source: 'screen_share',
+          muted: false,
+        },
+      ]
+    }),
+    setMuted: vi.fn(),
+    setDeafened: vi.fn(),
+    stopScreenShare: vi.fn(async () => {
+      localScreenSharePublications = []
+    }),
+    snapshot: vi.fn(() => ({
+      status: 'connected',
+      roomName: 'opencord_voice_test',
+      participantIdentity: 'test-user',
+      localAudioPublications: [],
+      localScreenSharePublications,
+      remoteParticipants: [],
+    })),
+  }
 }

@@ -274,6 +274,13 @@ export type JoinVoiceChannelRequest = {
   selfDeaf?: boolean
 }
 
+export type CreateMeetingMediaTokenRequest = {
+  canPublishAudio?: boolean
+  canPublishVideo?: boolean
+  canPublishScreen?: boolean
+  canSubscribe?: boolean
+}
+
 export type MediaTokenGrants = {
   canPublishAudio: boolean
   canPublishVideo: boolean
@@ -288,8 +295,9 @@ export type MediaRoomToken = {
   roomType: string
   roomName: string
   organizationId: string
-  spaceId: string
-  channelId: string
+  spaceId: string | null
+  channelId: string | null
+  meetingId: string | null
   participantIdentity: string
   participantToken: string
   expiresAt: string
@@ -636,6 +644,7 @@ type MediaRoomTokenPayload = {
   organization_id?: unknown
   space_id?: unknown
   channel_id?: unknown
+  meeting_id?: unknown
   participant_identity?: unknown
   participant_token?: unknown
   expires_at?: unknown
@@ -651,6 +660,10 @@ type VoiceParticipantPayload = {
 
 type VoiceJoinPayload = {
   voice?: unknown
+  media?: unknown
+}
+
+type MediaRoomTokenResourcePayload = {
   media?: unknown
 }
 
@@ -1083,6 +1096,26 @@ export class OpenCordApiClient {
     }
   }
 
+  async createMeetingMediaToken(
+    meetingId: string,
+    request: CreateMeetingMediaTokenRequest = {},
+  ): Promise<MediaRoomToken> {
+    const payload = await this.requestJson<MediaRoomTokenResourcePayload>(
+      `/meetings/${encodeURIComponent(meetingId)}/media/token`,
+      {
+        body: JSON.stringify({
+          can_publish_audio: request.canPublishAudio,
+          can_publish_video: request.canPublishVideo,
+          can_publish_screen: request.canPublishScreen,
+          can_subscribe: request.canSubscribe,
+        }),
+        method: 'POST',
+      },
+    )
+
+    return mediaRoomTokenFromPayload(payload.media)
+  }
+
   async createCommandInteraction(
     channelId: string,
     request: CreateCommandInteractionRequest,
@@ -1340,8 +1373,9 @@ function mediaRoomTokenFromPayload(value: unknown): MediaRoomToken {
     roomType: stringValue(payload.room_type, 'voice_channel'),
     roomName: stringValue(payload.room_name, ''),
     organizationId: stringValue(payload.organization_id, ''),
-    spaceId: stringValue(payload.space_id, ''),
-    channelId: stringValue(payload.channel_id, ''),
+    spaceId: nullableStringValue(payload.space_id),
+    channelId: nullableStringValue(payload.channel_id),
+    meetingId: nullableStringValue(payload.meeting_id),
     participantIdentity: stringValue(payload.participant_identity, ''),
     participantToken: stringValue(payload.participant_token, ''),
     expiresAt: stringValue(payload.expires_at, ''),

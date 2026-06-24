@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
-import type { FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { FormEvent, RefObject } from 'react'
 import {
   createOpenCordApiClient,
   OpenCordApiError,
@@ -14,9 +14,17 @@ import {
   type Space as ApiSpace,
 } from '@opencord/api-client'
 import {
+  connectLiveKitVoice,
+  type LiveKitVoiceSession,
+  type LiveKitVoiceState,
+} from '@opencord/media'
+import {
   INITIAL_REALTIME_STATUS,
+  createOpenCordRealtimeClient,
   realtimeUrlForServer,
   type RealtimeConnectionStatus,
+  type RealtimeEventEnvelope,
+  type RealtimeIncomingEnvelope,
 } from '@opencord/realtime'
 import {
   activeServerConnection,
@@ -126,9 +134,20 @@ type VoiceParticipant = {
 
 type VoiceState = {
   connectedChannelId: string | null
+  mediaReady: boolean
   selfMute: boolean
   selfDeaf: boolean
   participants: VoiceParticipant[]
+}
+
+type LocalAlphaSessionSnapshot = {
+  baseUrl: string
+  email: string
+  displayName: string
+  sessionToken: string
+  user: AuthUser
+  organization: Organization
+  reconnectVoiceChannelId: string | null
 }
 
 type ScreenShareState =
@@ -198,9 +217,27 @@ type MeetingRoomParticipant = {
 
 type MeetingRoomState = {
   meeting: CalendarMeeting
+  mediaStatus: 'connecting' | 'connected' | 'error'
+  mediaError?: string
   selfMute: boolean
   cameraOff: boolean
   participants: MeetingRoomParticipant[]
+}
+
+type OpenCordDesktopRuntime = {
+  platform: string
+  versions?: {
+    chrome?: string
+    electron?: string
+    node?: string
+  }
+}
+
+declare global {
+  interface Window {
+    __OPENCORD_MEDIA_RTC_CONFIG__?: RTCConfiguration
+    openCordDesktop?: OpenCordDesktopRuntime
+  }
 }
 
 const initialSpaces: Space[] = [
@@ -349,6 +386,7 @@ const members: Member[] = [
 
 const initialVoiceState: VoiceState = {
   connectedChannelId: 'standup',
+  mediaReady: false,
   selfMute: false,
   selfDeaf: false,
   participants: [
@@ -395,6 +433,8 @@ const defaultDeveloperPermissionIds: DeveloperPermissionId[] = [
   'use_slash_commands',
 ]
 
+const localAlphaSessionStorageKey = 'opencord.localAlphaSession:v1'
+
 function meetingRoomStateFor(meetingId: string | undefined): MeetingRoomState {
   const meeting = initialMeetings.find((candidate) => candidate.id === meetingId) ?? initialMeetings[0]
   return meetingRoomStateForMeeting(meeting)
@@ -414,6 +454,7 @@ function meetingRoomStateForMeeting(meeting: CalendarMeeting): MeetingRoomState 
 
   return {
     meeting,
+    mediaStatus: 'connected',
     selfMute: false,
     cameraOff: false,
     participants,
@@ -438,7 +479,8 @@ export function WorkspaceShell({
   const [serverURL, setServerURL] = useState(activeConnection.baseUrl)
   const [serverDisplayName, setServerDisplayName] = useState('')
   const [health, setHealth] = useState<HealthState>({ status: 'checking' })
-  const [realtimeStatus] = useState<RealtimeConnectionStatus>(INITIAL_REALTIME_STATUS)
+  const [realtimeStatus, setRealtimeStatus] =
+    useState<RealtimeConnectionStatus>(INITIAL_REALTIME_STATUS)
   const [spaces, setSpaces] = useState(initialSpaces)
   const [channels, setChannels] = useState(initialChannels)
   const [messages, setMessages] = useState(initialMessages)
@@ -447,6 +489,7 @@ export function WorkspaceShell({
   const [composerText, setComposerText] = useState('')
   const [pendingAttachments, setPendingAttachments] = useState<MessageAttachment[]>([])
   const [showChannelForm, setShowChannelForm] = useState(false)
+  const [showUserSettings, setShowUserSettings] = useState(false)
   const [newChannelName, setNewChannelName] = useState('')
   const [editingMessage, setEditingMessage] = useState<{ id: string; body: string } | null>(null)
   const [voiceState, setVoiceState] = useState(initialVoiceState)
@@ -468,6 +511,9 @@ export function WorkspaceShell({
     'idle',
   )
   const [localAlphaError, setLocalAlphaError] = useState<string | null>(null)
+  const [pendingVoiceReconnectChannelId, setPendingVoiceReconnectChannelId] = useState<
+    string | null
+  >(null)
   const [meetingRoom, setMeetingRoom] = useState<MeetingRoomState | null>(() =>
     initialPanel === 'meeting' ? meetingRoomStateFor(initialMeetingId) : null,
   )
@@ -485,6 +531,15 @@ export function WorkspaceShell({
   const [newBotName, setNewBotName] = useState('')
   const [newBotDescription, setNewBotDescription] = useState('')
   const [newWebhookName, setNewWebhookName] = useState('')
+  const voiceSessionRef = useRef<LiveKitVoiceSession | null>(null)
+  const meetingSessionRef = useRef<LiveKitVoiceSession | null>(null)
+  const localAlphaUserRef = useRef<AuthUser | null>(null)
+  const voiceStateRef = useRef(voiceState)
+  const meetingRoomRef = useRef(meetingRoom)
+  const remoteAudioContainerRef = useRef<HTMLDivElement | null>(null)
+  const remoteScreenShareContainerRef = useRef<HTMLElement | null>(null)
+  const meetingRemoteAudioContainerRef = useRef<HTMLDivElement | null>(null)
+  const meetingRemoteScreenShareContainerRef = useRef<HTMLElement | null>(null)
 
   const selectedSpace = spaces.find((space) => space.id === selectedSpaceId) ?? spaces[0]
   const visibleChannels = channels.filter((channel) => channel.spaceId === selectedSpace.id)
@@ -492,6 +547,7 @@ export function WorkspaceShell({
     visibleChannels.find((channel) => channel.id === selectedChannelId) ?? visibleChannels[0]
   const channelMessages = messages.filter((message) => message.channelId === selectedChannel.id)
   const groupedMembers = useMemo(() => groupMembersByRole(members), [])
+  const desktopRuntime = getOpenCordDesktopRuntime()
   const realtimeURL = useMemo(
     () => safeRealtimeURL(activeConnection.baseUrl),
     [activeConnection.baseUrl],
@@ -538,33 +594,122 @@ export function WorkspaceShell({
         baseUrl: activeConnection.baseUrl,
         sessionToken: authResult.session.token,
       })
-      const workspace = await ensureLocalAlphaWorkspace(client, authResult.user)
-      const [loadedMessages, loadedMeetings] = await Promise.all([
-        client.listMessages(workspace.channel.id),
-        client.listMeetings(workspace.organization.id),
-      ])
-
-      setLocalAlphaUser(authResult.user)
-      setLocalAlphaSessionToken(authResult.session.token)
-      setLocalAlphaOrganization(workspace.organization)
-      setSpaces([spaceFromApi(workspace.space)])
-      setChannels(workspace.channels.map(channelFromApi))
-      setMessages(loadedMessages.map((message) => chatMessageFromApi(message, authResult.user)))
-      setMeetings(loadedMeetings.map(calendarMeetingFromApi))
-      setSelectedSpaceId(workspace.space.id)
-      setSelectedChannelId(workspace.channel.id)
-      setDeveloperSessionToken(authResult.session.token)
-      setDeveloperOrganizationId(workspace.organization.id)
-      setDeveloperSpaceId(workspace.space.id)
-      setDeveloperChannelId(workspace.channel.id)
-      setPendingAttachments([])
-      setMeetingRoom(null)
-      setActivePanel('chat')
-      setLocalAlphaStatus('ready')
+      await loadLocalAlphaWorkspace({
+        client,
+        displayName,
+        email,
+        reconnectVoiceChannelId: null,
+        sessionToken: authResult.session.token,
+        user: authResult.user,
+      })
     } catch (error) {
       setLocalAlphaStatus('error')
       setLocalAlphaError(error instanceof Error ? error.message : 'Unable to start local alpha')
     }
+  }
+
+  async function restoreLocalAlphaSession(snapshot: LocalAlphaSessionSnapshot) {
+    setLocalAlphaStatus('loading')
+    setLocalAlphaError(null)
+    setLocalAlphaEmail(snapshot.email)
+    setLocalAlphaDisplayName(snapshot.displayName)
+
+    try {
+      const client = createOpenCordApiClient({
+        baseUrl: activeConnection.baseUrl,
+        sessionToken: snapshot.sessionToken,
+      })
+      await loadLocalAlphaWorkspace({
+        client,
+        displayName: snapshot.displayName,
+        email: snapshot.email,
+        reconnectVoiceChannelId: snapshot.reconnectVoiceChannelId,
+        sessionToken: snapshot.sessionToken,
+        user: snapshot.user,
+      })
+    } catch (error) {
+      clearLocalAlphaSession()
+      setLocalAlphaStatus('idle')
+      setLocalAlphaError(null)
+    }
+  }
+
+  async function loadLocalAlphaWorkspace({
+    client,
+    displayName,
+    email,
+    reconnectVoiceChannelId,
+    sessionToken,
+    user,
+  }: {
+    client: ReturnType<typeof createOpenCordApiClient>
+    displayName: string
+    email: string
+    reconnectVoiceChannelId: string | null
+    sessionToken: string
+    user: AuthUser
+  }) {
+    const workspace = await ensureLocalAlphaWorkspace(client, user)
+    const [loadedMessages, loadedMeetings] = await Promise.all([
+      client.listMessages(workspace.channel.id),
+      client.listMeetings(workspace.organization.id),
+    ])
+
+    await voiceSessionRef.current?.disconnect()
+    voiceSessionRef.current = null
+    await meetingSessionRef.current?.disconnect()
+    meetingSessionRef.current = null
+    setVoiceState({
+      connectedChannelId: null,
+      mediaReady: false,
+      selfMute: false,
+      selfDeaf: false,
+      participants: [],
+    })
+    saveLocalAlphaSession({
+      baseUrl: activeConnection.baseUrl,
+      displayName,
+      email,
+      organization: workspace.organization,
+      reconnectVoiceChannelId,
+      sessionToken,
+      user,
+    })
+
+    setLocalAlphaUser(user)
+    setLocalAlphaSessionToken(sessionToken)
+    setLocalAlphaOrganization(workspace.organization)
+    setSpaces([spaceFromApi(workspace.space)])
+    setChannels(workspace.channels.map(channelFromApi))
+    setMessages(loadedMessages.map((message) => chatMessageFromApi(message, user)))
+    setMeetings(loadedMeetings.map(calendarMeetingFromApi))
+    setSelectedSpaceId(workspace.space.id)
+    setSelectedChannelId(workspace.channel.id)
+    setDeveloperSessionToken(sessionToken)
+    setDeveloperOrganizationId(workspace.organization.id)
+    setDeveloperSpaceId(workspace.space.id)
+    setDeveloperChannelId(workspace.channel.id)
+    setPendingAttachments([])
+    setMeetingRoom(null)
+    setActivePanel('chat')
+    setPendingVoiceReconnectChannelId(reconnectVoiceChannelId)
+    setLocalAlphaStatus('ready')
+  }
+
+  function persistLocalAlphaSession(reconnectVoiceChannelId: string | null) {
+    if (!localAlphaSessionToken || !localAlphaUser || !localAlphaOrganization) {
+      return
+    }
+
+    saveLocalAlphaSession({
+      baseUrl: activeConnection.baseUrl,
+      displayName: localAlphaUser.displayName,
+      email: localAlphaUser.email,
+      organization: localAlphaOrganization,
+      reconnectVoiceChannelId,
+      sessionToken: localAlphaSessionToken,
+      user: localAlphaUser,
+    })
   }
 
   async function registerOrLoginLocalAlpha(
@@ -635,6 +780,73 @@ export function WorkspaceShell({
   useEffect(() => {
     saveBrowserServerConnectionState(serverConnections)
   }, [serverConnections])
+
+  useEffect(() => {
+    localAlphaUserRef.current = localAlphaUser
+  }, [localAlphaUser])
+
+  useEffect(() => {
+    voiceStateRef.current = voiceState
+  }, [voiceState])
+
+  useEffect(() => {
+    meetingRoomRef.current = meetingRoom
+  }, [meetingRoom])
+
+  useEffect(() => {
+    const snapshot = loadLocalAlphaSession()
+    if (!snapshot || snapshot.baseUrl !== activeConnection.baseUrl) {
+      return
+    }
+
+    void restoreLocalAlphaSession(snapshot)
+  }, [])
+
+  useEffect(() => {
+    if (!pendingVoiceReconnectChannelId || localAlphaStatus !== 'ready') {
+      return
+    }
+    const channel = channels.find(
+      (candidate) => candidate.id === pendingVoiceReconnectChannelId,
+    )
+    if (channel?.kind !== 'voice') {
+      return
+    }
+
+    const channelId = pendingVoiceReconnectChannelId
+    setPendingVoiceReconnectChannelId(null)
+    void joinVoiceChannel(channelId)
+  }, [channels, localAlphaStatus, pendingVoiceReconnectChannelId])
+
+  useEffect(() => {
+    if (!localAlphaSessionToken) {
+      setRealtimeStatus(INITIAL_REALTIME_STATUS)
+      return
+    }
+
+    const client = createOpenCordRealtimeClient({
+      serverUrl: activeConnection.baseUrl,
+      token: localAlphaSessionToken,
+    })
+    const unsubscribeStatus = client.onStatus(setRealtimeStatus)
+    const unsubscribeEvent = client.onEvent((event) => handleRealtimeMediaEvent(event))
+    client.connect()
+
+    return () => {
+      unsubscribeEvent()
+      unsubscribeStatus()
+      client.disconnect()
+    }
+  }, [activeConnection.baseUrl, localAlphaSessionToken])
+
+  useEffect(() => {
+    return () => {
+      void voiceSessionRef.current?.disconnect()
+      voiceSessionRef.current = null
+      void meetingSessionRef.current?.disconnect()
+      meetingSessionRef.current = null
+    }
+  }, [])
 
   async function submitServer(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -1228,12 +1440,90 @@ export function WorkspaceShell({
     setShowMeetingForm(false)
   }
 
-  function joinMeetingRoom(meeting: CalendarMeeting) {
-    setMeetingRoom(meetingRoomStateForMeeting(meeting))
+  async function joinMeetingRoom(meeting: CalendarMeeting) {
+    await meetingSessionRef.current?.disconnect()
+    meetingSessionRef.current = null
+
+    const nextRoom = meetingRoomStateForMeeting(meeting)
+    setMeetingRoom({
+      ...nextRoom,
+      mediaStatus:
+        localAlphaSessionToken && isServerBackedId(meeting.id) ? 'connecting' : 'connected',
+    })
     setActivePanel('meeting')
+
+    if (!localAlphaSessionToken || !isServerBackedId(meeting.id)) {
+      return
+    }
+
+    const client = createOpenCordApiClient({
+      baseUrl: activeConnection.baseUrl,
+      sessionToken: localAlphaSessionToken,
+    })
+
+    try {
+      setLocalAlphaError(null)
+      const media = await client.createMeetingMediaToken(meeting.id, {
+        canPublishAudio: true,
+        canPublishVideo: true,
+        canPublishScreen: true,
+        canSubscribe: true,
+      })
+      await voiceSessionRef.current?.disconnect()
+      voiceSessionRef.current = null
+      persistLocalAlphaSession(null)
+      setVoiceState((current) => ({
+        ...current,
+        connectedChannelId: null,
+        mediaReady: false,
+        selfMute: false,
+        selfDeaf: false,
+        participants: current.participants.filter((participant) => !participant.self),
+      }))
+
+      const session = await connectLiveKitVoice({
+        serverUrl: media.serverUrl,
+        participantToken: media.participantToken,
+        roomName: media.roomName,
+        participantIdentity: media.participantIdentity,
+        grants: media.grants,
+        selfMute: nextRoom.selfMute,
+        selfDeaf: false,
+        rtcConfig: opencordMediaRtcConfig(),
+        audioElementContainer: meetingRemoteAudioContainerRef.current,
+        screenShareElementContainer: meetingRemoteScreenShareContainerRef.current,
+        onStateChange: (mediaState) => {
+          setMeetingRoom((current) =>
+            current?.meeting.id === meeting.id
+              ? mergeLiveKitMeetingState(current, mediaState)
+              : current,
+          )
+        },
+      })
+      meetingSessionRef.current = session
+      setMeetingRoom((current) =>
+        current?.meeting.id === meeting.id ? { ...current, mediaStatus: 'connected' } : current,
+      )
+    } catch (error) {
+      await meetingSessionRef.current?.disconnect()
+      meetingSessionRef.current = null
+      setLocalAlphaStatus('error')
+      setLocalAlphaError(error instanceof Error ? error.message : 'Unable to join meeting media')
+      setMeetingRoom((current) =>
+        current?.meeting.id === meeting.id
+          ? {
+              ...current,
+              mediaStatus: 'error',
+              mediaError: error instanceof Error ? error.message : 'Unable to join meeting media',
+            }
+          : current,
+      )
+    }
   }
 
   function leaveMeetingRoom() {
+    void meetingSessionRef.current?.disconnect()
+    meetingSessionRef.current = null
     setScreenShareState((current) => {
       if (current.status === 'sharing') {
         stopScreenShareTracks(current.stream)
@@ -1246,9 +1536,15 @@ export function WorkspaceShell({
   }
 
   function toggleMeetingMute() {
-    setMeetingRoom((current) =>
-      current ? { ...current, selfMute: !current.selfMute } : current,
-    )
+    setMeetingRoom((current) => {
+      if (!current) {
+        return current
+      }
+
+      const selfMute = !current.selfMute
+      void meetingSessionRef.current?.setMuted(selfMute)
+      return { ...current, selfMute }
+    })
   }
 
   function toggleMeetingCamera() {
@@ -1385,9 +1681,84 @@ export function WorkspaceShell({
     setMessages((current) => current.filter((message) => message.id !== messageId))
   }
 
-  function joinVoiceChannel(channelId: string) {
+  async function joinVoiceChannel(channelId: string) {
     const channel = channels.find((candidate) => candidate.id === channelId)
     if (channel?.kind !== 'voice') {
+      return
+    }
+
+    if (localAlphaSessionToken) {
+      const selfMute = voiceState.selfMute
+      const selfDeaf = voiceState.selfDeaf
+      const client = createOpenCordApiClient({
+        baseUrl: activeConnection.baseUrl,
+        sessionToken: localAlphaSessionToken,
+      })
+
+      try {
+        setLocalAlphaError(null)
+        const joined = await client.joinVoiceChannel(channelId, {
+          selfMute,
+          selfDeaf,
+        })
+        await voiceSessionRef.current?.disconnect()
+        voiceSessionRef.current = null
+
+        const selfParticipant = voiceParticipantFromJoin(
+          channelId,
+          joined.voice.userId,
+          localAlphaUser?.displayName ?? 'You',
+          selfMute,
+          selfDeaf,
+        )
+
+        setVoiceState((current) => ({
+          ...current,
+          connectedChannelId: channelId,
+          mediaReady: false,
+          selfMute,
+          selfDeaf,
+          participants: [
+            ...current.participants.filter((participant) => !participant.self),
+            selfParticipant,
+          ],
+        }))
+
+        const session = await connectLiveKitVoice({
+          serverUrl: joined.media.serverUrl,
+          participantToken: joined.media.participantToken,
+          roomName: joined.media.roomName,
+          participantIdentity: joined.media.participantIdentity,
+          grants: joined.media.grants,
+          selfMute,
+          selfDeaf,
+          rtcConfig: opencordMediaRtcConfig(),
+          audioElementContainer: remoteAudioContainerRef.current,
+          screenShareElementContainer: remoteScreenShareContainerRef.current,
+          onStateChange: (mediaState) => {
+            setVoiceState((current) => mergeLiveKitVoiceState(current, channelId, mediaState))
+          },
+        })
+        voiceSessionRef.current = session
+        setVoiceState((current) =>
+          current.connectedChannelId === channelId ? { ...current, mediaReady: true } : current,
+        )
+        persistLocalAlphaSession(channelId)
+      } catch (error) {
+        setLocalAlphaStatus('error')
+        setLocalAlphaError(error instanceof Error ? error.message : 'Unable to join voice')
+        await voiceSessionRef.current?.disconnect()
+        voiceSessionRef.current = null
+        setVoiceState((current) => ({
+          ...current,
+          connectedChannelId:
+            current.connectedChannelId === channelId ? null : current.connectedChannelId,
+          mediaReady: current.connectedChannelId === channelId ? false : current.mediaReady,
+          participants: current.participants.filter(
+            (participant) => !(participant.self && participant.channelId === channelId),
+          ),
+        }))
+      }
       return
     }
 
@@ -1397,6 +1768,7 @@ export function WorkspaceShell({
       return {
         ...current,
         connectedChannelId: channelId,
+        mediaReady: false,
         participants: [
           ...withoutSelf,
           {
@@ -1412,6 +1784,9 @@ export function WorkspaceShell({
   }
 
   function disconnectVoice() {
+    void voiceSessionRef.current?.disconnect()
+    voiceSessionRef.current = null
+    persistLocalAlphaSession(null)
     setScreenShareState((current) => {
       if (current.status === 'sharing') {
         stopScreenShareTracks(current.stream)
@@ -1422,15 +1797,100 @@ export function WorkspaceShell({
     setVoiceState((current) => ({
       ...current,
       connectedChannelId: null,
+      mediaReady: false,
       selfMute: false,
       selfDeaf: false,
       participants: current.participants.filter((participant) => !participant.self),
     }))
   }
 
+  function disconnectVoiceForPermissionChange(message: string) {
+    void voiceSessionRef.current?.disconnect()
+    voiceSessionRef.current = null
+    persistLocalAlphaSession(null)
+    setScreenShareState((current) => {
+      if (current.status === 'sharing') {
+        stopScreenShareTracks(current.stream)
+      }
+
+      return { status: 'idle' }
+    })
+    setVoiceState((current) => ({
+      ...current,
+      connectedChannelId: null,
+      mediaReady: false,
+      selfMute: false,
+      selfDeaf: false,
+      participants: current.participants.filter((participant) => !participant.self),
+    }))
+    setLocalAlphaStatus('ready')
+    setLocalAlphaError(message)
+  }
+
+  function handleRealtimeMediaEvent(event: RealtimeIncomingEnvelope) {
+    if (!isRealtimeEvent(event) || event.type !== 'media.permission_revoked') {
+      return
+    }
+
+    const data = unknownRecord(event.data)
+    const currentUser = localAlphaUserRef.current
+    if (
+      !data ||
+      !currentUser ||
+      data.target_kind !== 'member' ||
+      data.target_id !== currentUser.id
+    ) {
+      return
+    }
+
+    const channelId =
+      typeof data.channel_id === 'string' ? data.channel_id : event.scope.channel_id
+    if (!channelId || voiceStateRef.current.connectedChannelId !== channelId) {
+      return
+    }
+
+    const grants = unknownRecord(data.grants)
+    if (data.action === 'disconnect' || grants?.can_subscribe === false) {
+      disconnectVoiceForPermissionChange(
+        'Voice access changed. You were removed from the channel.',
+      )
+      return
+    }
+
+    if (grants?.can_publish_audio === false) {
+      void voiceSessionRef.current?.setMuted(true)
+      setVoiceState((current) => ({
+        ...current,
+        selfMute: true,
+        participants: current.participants.map((participant) =>
+          participant.self
+            ? {
+                ...participant,
+                status: current.selfDeaf ? 'deafened' : 'muted',
+              }
+            : participant,
+        ),
+      }))
+      setLocalAlphaError('Voice permissions changed. Your microphone was muted.')
+    }
+
+    if (grants?.can_publish_screen === false) {
+      void voiceSessionRef.current?.stopScreenShare()
+      setScreenShareState((current) => {
+        if (current.status === 'sharing') {
+          stopScreenShareTracks(current.stream)
+        }
+
+        return { status: 'idle' }
+      })
+      setLocalAlphaError('Voice permissions changed. Screen sharing stopped.')
+    }
+  }
+
   function toggleSelfMute() {
     setVoiceState((current) => {
       const selfMute = !current.selfMute
+      void voiceSessionRef.current?.setMuted(selfMute)
 
       return {
         ...current,
@@ -1449,7 +1909,8 @@ export function WorkspaceShell({
 
   async function startScreenShare() {
     if (
-      (!voiceState.connectedChannelId && !meetingRoom) ||
+      (!meetingRoom && (!voiceState.connectedChannelId || !voiceState.mediaReady)) ||
+      (meetingRoom && meetingRoom.mediaStatus !== 'connected') ||
       screenShareState.status === 'starting' ||
       screenShareState.status === 'sharing'
     ) {
@@ -1462,8 +1923,9 @@ export function WorkspaceShell({
     }
 
     setScreenShareState({ status: 'starting' })
+    let stream: MediaStream | null = null
     try {
-      const stream = await navigator.mediaDevices.getDisplayMedia({
+      stream = await navigator.mediaDevices.getDisplayMedia({
         audio: false,
         video: true,
       })
@@ -1477,17 +1939,29 @@ export function WorkspaceShell({
       videoTrack.addEventListener(
         'ended',
         () => {
+          void (meetingRoom ? meetingSessionRef.current : voiceSessionRef.current)?.stopScreenShare()
           setScreenShareState({ status: 'idle' })
         },
         { once: true },
       )
+      const mediaSession = meetingRoom ? meetingSessionRef.current : voiceSessionRef.current
+      if (!mediaSession) {
+        throw new Error('No active media session')
+      }
+
+      await mediaSession.publishScreenShare(stream)
       setScreenShareState({ status: 'sharing', stream })
     } catch (error) {
+      if (stream) {
+        stopScreenShareTracks(stream)
+      }
+      console.warn('OpenCord screen share failed', screenShareErrorDetails(error))
       setScreenShareState({ status: 'error', message: screenShareErrorMessage(error) })
     }
   }
 
   function stopScreenShare() {
+    void (meetingRoom ? meetingSessionRef.current : voiceSessionRef.current)?.stopScreenShare()
     setScreenShareState((current) => {
       if (current.status === 'sharing') {
         stopScreenShareTracks(current.stream)
@@ -1500,6 +1974,7 @@ export function WorkspaceShell({
   function toggleSelfDeaf() {
     setVoiceState((current) => {
       const selfDeaf = !current.selfDeaf
+      void voiceSessionRef.current?.setDeafened(selfDeaf)
 
       return {
         ...current,
@@ -1695,6 +2170,12 @@ export function WorkspaceShell({
           onStartScreenShare={startScreenShare}
           onStopScreenShare={stopScreenShare}
         />
+        <div ref={remoteAudioContainerRef} className="voice-audio-sink" aria-hidden="true" />
+        <section
+          ref={remoteScreenShareContainerRef}
+          className="remote-screen-shares"
+          aria-label="Remote screen shares"
+        />
 
         <div className="user-footer">
           <div className="avatar">Y</div>
@@ -1702,10 +2183,21 @@ export function WorkspaceShell({
             <strong>You</strong>
             <span>Online</span>
           </div>
-          <button type="button" aria-label="User settings">
+          <button
+            type="button"
+            aria-expanded={showUserSettings}
+            aria-label="User settings"
+            onClick={() => setShowUserSettings((current) => !current)}
+          >
             Set
           </button>
         </div>
+        {showUserSettings ? (
+          <UserSettingsPanel
+            desktopRuntime={desktopRuntime}
+            onClose={() => setShowUserSettings(false)}
+          />
+        ) : null}
       </nav>
 
       <section className="chat-panel" aria-label="Selected channel">
@@ -1795,6 +2287,8 @@ export function WorkspaceShell({
           />
         ) : activePanel === 'meeting' && meetingRoom ? (
           <MeetingRoomPanel
+            meetingRemoteAudioContainerRef={meetingRemoteAudioContainerRef}
+            meetingRemoteScreenShareContainerRef={meetingRemoteScreenShareContainerRef}
             meetingRoom={meetingRoom}
             screenShareState={screenShareState}
             onLeave={leaveMeetingRoom}
@@ -1948,6 +2442,76 @@ export function WorkspaceShell({
         ))}
       </aside>
     </WorkspaceLayout>
+  )
+}
+
+function UserSettingsPanel({
+  desktopRuntime,
+  onClose,
+}: {
+  desktopRuntime: OpenCordDesktopRuntime | null
+  onClose: () => void
+}) {
+  const isMacDesktop = desktopRuntime?.platform === 'darwin'
+  const platformLabel = desktopRuntime
+    ? desktopRuntime.platform === 'darwin'
+      ? 'macOS desktop'
+      : `${desktopRuntime.platform} desktop`
+    : 'web browser'
+
+  return (
+    <section className="user-settings-popover" aria-label="Voice & Video settings">
+      <header>
+        <div>
+          <h2>Voice & Video</h2>
+          <p>{platformLabel}</p>
+        </div>
+        <button type="button" aria-label="Close user settings" onClick={onClose}>
+          Close
+        </button>
+      </header>
+      <div className="device-permission-list">
+        <DevicePermissionRow
+          label="Microphone"
+          status="Ask before join"
+          detail="Used to publish your voice only while you are connected to a voice channel or meeting."
+        />
+        <DevicePermissionRow
+          label="Screen share"
+          status={isMacDesktop ? 'Requires macOS System Settings' : 'Ask before share'}
+          detail={
+            isMacDesktop
+              ? 'Used only while sharing; macOS System Settings controls screen recording access for OpenCord.'
+              : 'Used only while you publish a display track; browser access is requested for each share.'
+          }
+        />
+        <DevicePermissionRow
+          label="Speaker output"
+          status="No publish access"
+          detail="Used to play remote voice and meeting audio from other participants."
+        />
+      </div>
+    </section>
+  )
+}
+
+function DevicePermissionRow({
+  detail,
+  label,
+  status,
+}: {
+  detail: string
+  label: string
+  status: string
+}) {
+  return (
+    <article className="device-permission-row">
+      <div>
+        <strong>{label}</strong>
+        <p>{detail}</p>
+      </div>
+      <span>{status}</span>
+    </article>
   )
 }
 
@@ -2402,6 +2966,8 @@ function CalendarPanel({
 }
 
 function MeetingRoomPanel({
+  meetingRemoteAudioContainerRef,
+  meetingRemoteScreenShareContainerRef,
   meetingRoom,
   screenShareState,
   onLeave,
@@ -2410,6 +2976,8 @@ function MeetingRoomPanel({
   onToggleCamera,
   onToggleMute,
 }: {
+  meetingRemoteAudioContainerRef: RefObject<HTMLDivElement | null>
+  meetingRemoteScreenShareContainerRef: RefObject<HTMLElement | null>
   meetingRoom: MeetingRoomState
   screenShareState: ScreenShareState
   onLeave: () => void
@@ -2431,13 +2999,19 @@ function MeetingRoomPanel({
             {formatMeetingClock(meetingRoom.meeting.startsAt, meetingRoom.meeting.endsAt)}
           </p>
         </div>
-        <strong>Media room connected</strong>
+        <strong>{meetingMediaStatusLabel(meetingRoom)}</strong>
       </header>
 
       <div className="meeting-room-join">
         <span>Join URL</span>
         <code>{meetingRoom.meeting.joinUrl}</code>
       </div>
+
+      <section
+        ref={meetingRemoteScreenShareContainerRef}
+        className="remote-screen-shares meeting-remote-screen-shares"
+        aria-label="Meeting remote screen shares"
+      />
 
       <section className="meeting-room-grid" aria-label="Meeting participants">
         {meetingRoom.participants.map((participant) => {
@@ -2478,7 +3052,7 @@ function MeetingRoomPanel({
         <button
           type="button"
           aria-label={screenShareButtonLabel}
-          disabled={screenShareState.status === 'starting'}
+          disabled={meetingRoom.mediaStatus !== 'connected' || screenShareState.status === 'starting'}
           onClick={screenShareState.status === 'sharing' ? onStopScreenShare : onStartScreenShare}
         >
           {screenShareState.status === 'sharing'
@@ -2492,6 +3066,7 @@ function MeetingRoomPanel({
         </button>
       </div>
       <MeetingScreenShareStatus state={screenShareState} />
+      <div ref={meetingRemoteAudioContainerRef} className="voice-audio-sink" aria-hidden="true" />
     </section>
   )
 }
@@ -2676,7 +3251,7 @@ function VoiceControls({
         <button
           type="button"
           aria-label={screenShareButtonLabel}
-          disabled={!isConnected || screenShareState.status === 'starting'}
+          disabled={!isConnected || !voiceState.mediaReady || screenShareState.status === 'starting'}
           onClick={
             screenShareState.status === 'sharing' ? onStopScreenShare : onStartScreenShare
           }
@@ -2959,6 +3534,85 @@ function voiceParticipantsForChannel(voiceState: VoiceState, channelId: string) 
   })
 }
 
+function voiceParticipantFromJoin(
+  channelId: string,
+  userId: string,
+  name: string,
+  selfMute: boolean,
+  selfDeaf: boolean,
+): VoiceParticipant {
+  return {
+    id: userId,
+    channelId,
+    name,
+    status: selfDeaf ? 'deafened' : selfMute ? 'muted' : 'connected',
+    self: true,
+  }
+}
+
+function mergeLiveKitVoiceState(
+  voiceState: VoiceState,
+  channelId: string,
+  mediaState: LiveKitVoiceState,
+): VoiceState {
+  if (voiceState.connectedChannelId !== channelId) {
+    return voiceState
+  }
+
+  const remoteParticipants = mediaState.remoteParticipants.map((participant) => {
+    const hasUnmutedAudio = participant.audioPublications.some(
+      (publication) => !publication.muted,
+    )
+
+    return {
+      id: participant.identity,
+      channelId,
+      name: shortId(participant.identity),
+      status: hasUnmutedAudio ? 'speaking' : 'muted',
+    } satisfies VoiceParticipant
+  })
+  const selfParticipant = voiceState.participants.find((participant) => participant.self)
+
+  return {
+    ...voiceState,
+    connectedChannelId: mediaState.status === 'disconnected' ? null : channelId,
+    mediaReady: mediaState.status === 'connected',
+    participants: [
+      ...voiceState.participants.filter(
+        (participant) => !participant.self && participant.channelId !== channelId,
+      ),
+      ...(selfParticipant && mediaState.status !== 'disconnected' ? [selfParticipant] : []),
+      ...remoteParticipants,
+    ],
+  }
+}
+
+function mergeLiveKitMeetingState(
+  meetingRoom: MeetingRoomState,
+  mediaState: LiveKitVoiceState,
+): MeetingRoomState {
+  const selfParticipant = meetingRoom.participants.find((participant) => participant.self) ?? {
+    id: 'self',
+    name: 'You',
+    role: 'You',
+    self: true,
+  }
+  const remoteParticipants = mediaState.remoteParticipants.map(
+    (participant) =>
+      ({
+        id: participant.identity,
+        name: shortId(participant.identity),
+        role: 'Participant',
+      }) satisfies MeetingRoomParticipant,
+  )
+
+  return {
+    ...meetingRoom,
+    mediaStatus: mediaState.status === 'connected' ? 'connected' : 'connecting',
+    participants: [selfParticipant, ...remoteParticipants],
+  }
+}
+
 function voiceParticipantStatus(participant: VoiceParticipant, voiceState: VoiceState) {
   if (!participant.self) {
     return participant.status
@@ -2973,6 +3627,18 @@ function voiceParticipantStatus(participant: VoiceParticipant, voiceState: Voice
   }
 
   return 'connected'
+}
+
+function meetingMediaStatusLabel(meetingRoom: MeetingRoomState) {
+  if (meetingRoom.mediaStatus === 'connecting') {
+    return 'Media room connecting'
+  }
+
+  if (meetingRoom.mediaStatus === 'error') {
+    return meetingRoom.mediaError ?? 'Media room unavailable'
+  }
+
+  return 'Media room connected'
 }
 
 function meetingParticipantStatus(
@@ -3004,6 +3670,20 @@ function screenShareErrorMessage(error: unknown) {
   }
 
   return 'Screen share failed'
+}
+
+function screenShareErrorDetails(error: unknown) {
+  if (error instanceof Error) {
+    return {
+      message: error.message,
+      name: error.name,
+    }
+  }
+
+  return {
+    message: String(error),
+    name: typeof error,
+  }
 }
 
 function imagePreviewUrl(file: File) {
@@ -3114,6 +3794,29 @@ function safeRealtimeURL(serverURL: string) {
   } catch {
     return undefined
   }
+}
+
+function getOpenCordDesktopRuntime(): OpenCordDesktopRuntime | null {
+  const runtime = window.openCordDesktop
+  if (!runtime || typeof runtime.platform !== 'string') {
+    return null
+  }
+
+  return runtime
+}
+
+function opencordMediaRtcConfig() {
+  return window.__OPENCORD_MEDIA_RTC_CONFIG__
+}
+
+function isRealtimeEvent(event: RealtimeIncomingEnvelope): event is RealtimeEventEnvelope {
+  return 'id' in event && typeof event.id === 'string' && 'scope' in event
+}
+
+function unknownRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null
 }
 
 function realtimeStatusText(status: RealtimeConnectionStatus) {
@@ -3260,4 +3963,65 @@ function saveBrowserServerConnectionState(
   }
 
   saveServerConnectionState(window.localStorage, state)
+}
+
+function loadLocalAlphaSession(): LocalAlphaSessionSnapshot | null {
+  if (typeof window === 'undefined') {
+    return null
+  }
+
+  try {
+    const raw = window.localStorage.getItem(localAlphaSessionStorageKey)
+    if (!raw) {
+      return null
+    }
+
+    const snapshot = JSON.parse(raw) as Partial<LocalAlphaSessionSnapshot>
+    if (
+      typeof snapshot.baseUrl !== 'string' ||
+      typeof snapshot.email !== 'string' ||
+      typeof snapshot.displayName !== 'string' ||
+      typeof snapshot.sessionToken !== 'string' ||
+      typeof snapshot.user?.id !== 'string' ||
+      typeof snapshot.user.email !== 'string' ||
+      typeof snapshot.user.displayName !== 'string' ||
+      typeof snapshot.organization?.id !== 'string' ||
+      typeof snapshot.organization.name !== 'string'
+    ) {
+      clearLocalAlphaSession()
+      return null
+    }
+
+    return {
+      baseUrl: snapshot.baseUrl,
+      displayName: snapshot.displayName,
+      email: snapshot.email,
+      organization: snapshot.organization,
+      reconnectVoiceChannelId:
+        typeof snapshot.reconnectVoiceChannelId === 'string'
+          ? snapshot.reconnectVoiceChannelId
+          : null,
+      sessionToken: snapshot.sessionToken,
+      user: snapshot.user,
+    }
+  } catch {
+    clearLocalAlphaSession()
+    return null
+  }
+}
+
+function saveLocalAlphaSession(snapshot: LocalAlphaSessionSnapshot) {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  window.localStorage.setItem(localAlphaSessionStorageKey, JSON.stringify(snapshot))
+}
+
+function clearLocalAlphaSession() {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  window.localStorage.removeItem(localAlphaSessionStorageKey)
 }

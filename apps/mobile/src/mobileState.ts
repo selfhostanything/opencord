@@ -1,5 +1,6 @@
 import {
   normalizeOpenCordBaseUrl,
+  type Channel,
   type PushPlatform,
   type PushToken,
   type RegisterPushTokenRequest,
@@ -18,9 +19,18 @@ import {
   type ServerConnectionState,
 } from '@opencord/server-connections'
 
+import type { NativeScreenShareStream } from './nativeScreenShareStreams'
+
 export type MobileScreen = 'login' | 'channels' | 'chat'
 
 export const DEFAULT_MOBILE_OPENCORD_SERVER_URL = 'http://10.0.2.2:8080'
+export const IOS_SIMULATOR_MOBILE_OPENCORD_SERVER_URL = 'http://localhost:8080'
+
+export function mobileDefaultOpenCordServerUrlForPlatform(platform: string) {
+  return platform === 'ios'
+    ? IOS_SIMULATOR_MOBILE_OPENCORD_SERVER_URL
+    : DEFAULT_MOBILE_OPENCORD_SERVER_URL
+}
 
 export type MobileAccount = {
   email: string
@@ -78,10 +88,49 @@ export type MobileVoiceParticipant = {
   self?: boolean
 }
 
+export type MobileMediaPermissionKind =
+  | 'microphone'
+  | 'camera'
+  | 'screenShare'
+  | 'speaker'
+  | 'notifications'
+  | 'nativeCallIntegration'
+
+export type MobileMediaPermissionStatus =
+  | 'granted'
+  | 'denied'
+  | 'promptable'
+  | 'unsupported'
+  | 'system-settings-required'
+
+export type MobileMediaPermissions = Record<MobileMediaPermissionKind, MobileMediaPermissionStatus>
+
+export type MobileMediaPermissionRow = {
+  kind: MobileMediaPermissionKind
+  label: string
+  status: MobileMediaPermissionStatus
+  purpose: string
+  canRequest: boolean
+}
+
+export type MobileVoiceMediaState = {
+  displayName?: string
+  roomName: string
+  participantIdentity: string
+  canPublishAudio: boolean
+  canPublishScreen: boolean
+  canSubscribe: boolean
+  remoteScreenShares: number
+  remoteScreenShareStreams: NativeScreenShareStream[]
+}
+
 export type MobileVoiceState = {
   connectedChannelId: string | null
+  connectionStatus: 'idle' | 'connecting' | 'connected' | 'blocked' | 'failed'
+  errorMessage: string | null
   selfMute: boolean
   selfDeaf: boolean
+  media: MobileVoiceMediaState | null
   participants: MobileVoiceParticipant[]
 }
 
@@ -100,22 +149,58 @@ export type MobileAppState = {
   serverUrl: string
   serverConnections: ServerConnectionState
   account: MobileAccount | null
+  sessionToken: string | null
   channels: MobileChannel[]
   selectedChannelId: string
   messages: MobileMessage[]
   realtimeStatus: RealtimeConnectionStatus
   pushRegistration: MobilePushRegistration
+  mediaPermissions: MobileMediaPermissions
   voice: MobileVoiceState
 }
 
 export type MobileAction =
   | { type: 'login.submit'; serverUrl: string; email: string }
+  | {
+      type: 'login.succeeded'
+      serverUrl: string
+      email: string
+      displayName: string
+      sessionToken: string
+      channels: MobileChannel[]
+    }
   | { type: 'logout' }
   | { type: 'channel.select'; channelId: string }
   | { type: 'channel.back' }
   | { type: 'message.send'; content: string }
+  | { type: 'realtime.status_changed'; status: RealtimeConnectionStatus }
   | { type: 'realtime.message_created'; envelope: RealtimeIncomingEnvelope }
+  | { type: 'realtime.media_permission_revoked'; envelope: RealtimeIncomingEnvelope }
+  | {
+      type: 'permission.updated'
+      kind: MobileMediaPermissionKind
+      status: MobileMediaPermissionStatus
+    }
   | { type: 'voice.join'; channelId: string }
+  | { type: 'voice.media_connecting'; channelId: string; displayName?: string }
+  | {
+      type: 'voice.media_connected'
+      channelId: string
+      media: Omit<
+        MobileVoiceMediaState,
+        'canPublishScreen' | 'remoteScreenShares' | 'remoteScreenShareStreams'
+      > & {
+        canPublishScreen?: boolean
+        remoteScreenShares?: number
+        remoteScreenShareStreams?: NativeScreenShareStream[]
+      }
+    }
+  | { type: 'voice.media_failed'; message: string }
+  | {
+      type: 'voice.remote_screen_shares_updated'
+      count?: number
+      streams?: NativeScreenShareStream[]
+    }
   | { type: 'voice.leave' }
   | { type: 'voice.toggle_mute' }
   | { type: 'voice.toggle_deaf' }
@@ -205,16 +290,66 @@ const initialMessages: MobileMessage[] = [
 
 const initialVoiceState: MobileVoiceState = {
   connectedChannelId: null,
+  connectionStatus: 'idle',
+  errorMessage: null,
   selfMute: false,
   selfDeaf: false,
+  media: null,
   participants: [
     { id: 'voice-u1', channelId: 'standup', name: 'Mira', status: 'speaking' },
     { id: 'voice-u2', channelId: 'office-hours', name: 'Thanet', status: 'connected' },
   ],
 }
 
-export function createInitialMobileState(): MobileAppState {
-  const serverConnections = createDefaultMobileServerConnectionState()
+const initialMediaPermissions: MobileMediaPermissions = {
+  microphone: 'promptable',
+  camera: 'promptable',
+  screenShare: 'promptable',
+  speaker: 'unsupported',
+  notifications: 'promptable',
+  nativeCallIntegration: 'promptable',
+}
+
+const mediaPermissionRows: Array<Omit<MobileMediaPermissionRow, 'status' | 'canRequest'>> = [
+  {
+    kind: 'microphone',
+    label: 'Microphone',
+    purpose: 'Used when you speak in voice channels or meetings.',
+  },
+  {
+    kind: 'camera',
+    label: 'Camera',
+    purpose: 'Used when you turn on video in meetings.',
+  },
+  {
+    kind: 'screenShare',
+    label: 'Screen sharing',
+    purpose: 'Used when you share a screen, window, or tab.',
+  },
+  {
+    kind: 'speaker',
+    label: 'Speaker',
+    purpose: 'Used to play remote call audio through the selected output.',
+  },
+  {
+    kind: 'notifications',
+    label: 'Notifications',
+    purpose: 'Used for incoming call and meeting alerts.',
+  },
+  {
+    kind: 'nativeCallIntegration',
+    label: 'Native call integration',
+    purpose:
+      'Used to keep OpenCord voice and meeting audio visible on the lock screen and in system call controls.',
+  },
+]
+
+export function createInitialMobileState({
+  defaultServerUrl = DEFAULT_MOBILE_OPENCORD_SERVER_URL,
+}: {
+  defaultServerUrl?: string
+} = {}): MobileAppState {
+  const serverConnections = createDefaultMobileServerConnectionState(defaultServerUrl)
   const activeConnection = activeServerConnection(serverConnections)
 
   return {
@@ -222,11 +357,13 @@ export function createInitialMobileState(): MobileAppState {
     serverUrl: activeConnection?.baseUrl ?? DEFAULT_MOBILE_OPENCORD_SERVER_URL,
     serverConnections,
     account: null,
+    sessionToken: null,
     channels: initialChannels,
     selectedChannelId: initialChannels[0].id,
     messages: initialMessages,
     realtimeStatus: INITIAL_REALTIME_STATUS,
     pushRegistration: { status: 'idle' },
+    mediaPermissions: initialMediaPermissions,
     voice: initialVoiceState,
   }
 }
@@ -252,6 +389,28 @@ export function mobileReducer(state: MobileAppState, action: MobileAction): Mobi
           email,
           displayName: displayNameForEmail(email),
         },
+        sessionToken: null,
+      }
+    }
+    case 'login.succeeded': {
+      const serverConnections = upsertServerConnection(state.serverConnections, {
+        baseUrl: action.serverUrl,
+      })
+      const activeConnection = activeServerConnection(serverConnections)
+      const channels = action.channels.length > 0 ? action.channels : state.channels
+
+      return {
+        ...state,
+        screen: 'channels',
+        serverUrl: activeConnection?.baseUrl ?? normalizeOpenCordBaseUrl(action.serverUrl),
+        serverConnections,
+        account: {
+          email: action.email,
+          displayName: action.displayName,
+        },
+        sessionToken: action.sessionToken,
+        channels,
+        selectedChannelId: channels[0]?.id ?? state.selectedChannelId,
       }
     }
     case 'logout':
@@ -297,6 +456,11 @@ export function mobileReducer(state: MobileAppState, action: MobileAction): Mobi
         ],
       }
     }
+    case 'realtime.status_changed':
+      return {
+        ...state,
+        realtimeStatus: action.status,
+      }
     case 'realtime.message_created': {
       const message = messageFromRealtimeEnvelope(action.envelope)
       if (!message) {
@@ -313,10 +477,47 @@ export function mobileReducer(state: MobileAppState, action: MobileAction): Mobi
         ),
       }
     }
+    case 'realtime.media_permission_revoked':
+      return applyMobileMediaPermissionRevocation(state, action.envelope)
+    case 'permission.updated': {
+      const mediaPermissions = {
+        ...state.mediaPermissions,
+        [action.kind]: action.status,
+      }
+      const clearsMicrophoneBlock =
+        action.kind === 'microphone' &&
+        action.status === 'granted' &&
+        state.voice.connectionStatus === 'blocked'
+
+      return {
+        ...state,
+        mediaPermissions,
+        voice: clearsMicrophoneBlock
+          ? {
+              ...state.voice,
+              connectionStatus: 'idle',
+              errorMessage: null,
+            }
+          : state.voice,
+      }
+    }
     case 'voice.join': {
       const channel = state.channels.find((candidate) => candidate.id === action.channelId)
       if (channel?.kind !== 'voice') {
         return state
+      }
+      if (!mobileCanJoinVoice(state)) {
+        return {
+          ...state,
+          voice: {
+            ...state.voice,
+            connectedChannelId: null,
+            connectionStatus: 'blocked',
+            errorMessage: 'Microphone permission is required before joining voice.',
+            media: null,
+            participants: state.voice.participants.filter((participant) => !participant.self),
+          },
+        }
       }
 
       return {
@@ -324,6 +525,8 @@ export function mobileReducer(state: MobileAppState, action: MobileAction): Mobi
         voice: {
           ...state.voice,
           connectedChannelId: channel.id,
+          connectionStatus: 'connected',
+          errorMessage: null,
           participants: [
             ...state.voice.participants.filter((participant) => !participant.self),
             {
@@ -340,14 +543,107 @@ export function mobileReducer(state: MobileAppState, action: MobileAction): Mobi
         },
       }
     }
+    case 'voice.media_connecting': {
+      const channel = state.channels.find((candidate) => candidate.id === action.channelId)
+      if (channel?.kind !== 'voice' && !action.displayName) {
+        return state
+      }
+      if (!mobileCanJoinVoice(state)) {
+        return {
+          ...state,
+          voice: {
+            ...state.voice,
+            connectedChannelId: null,
+            connectionStatus: 'blocked',
+            errorMessage: 'Microphone permission is required before joining voice.',
+            media: null,
+            participants: state.voice.participants.filter((participant) => !participant.self),
+          },
+        }
+      }
+
+      return {
+        ...state,
+        voice: {
+          ...state.voice,
+          connectedChannelId: action.channelId,
+          connectionStatus: 'connecting',
+          errorMessage: null,
+          media: null,
+          participants: [
+            ...state.voice.participants.filter((participant) => !participant.self),
+            {
+              id: 'voice-self',
+              channelId: action.channelId,
+              name: 'You',
+              status: mobileSelfVoiceStatus({
+                selfDeaf: state.voice.selfDeaf,
+                selfMute: state.voice.selfMute,
+              }),
+              self: true,
+            },
+          ],
+        },
+      }
+    }
+    case 'voice.media_connected':
+      return {
+        ...state,
+        voice: {
+          ...state.voice,
+          connectedChannelId: action.channelId,
+          connectionStatus: 'connected',
+          errorMessage: null,
+          media: {
+            ...action.media,
+            canPublishScreen: action.media.canPublishScreen ?? false,
+            remoteScreenShareStreams: action.media.remoteScreenShareStreams ?? [],
+            remoteScreenShares:
+              action.media.remoteScreenShares ??
+              action.media.remoteScreenShareStreams?.length ??
+              0,
+          },
+        },
+      }
+    case 'voice.media_failed':
+      return {
+        ...state,
+        voice: {
+          ...state.voice,
+          connectedChannelId: null,
+          connectionStatus: 'failed',
+          errorMessage: action.message,
+          media: null,
+          participants: state.voice.participants.filter((participant) => !participant.self),
+        },
+      }
+    case 'voice.remote_screen_shares_updated':
+      return {
+        ...state,
+        voice: state.voice.media
+          ? {
+              ...state.voice,
+              media: {
+                ...state.voice.media,
+                remoteScreenShareStreams:
+                  action.streams ?? state.voice.media.remoteScreenShareStreams,
+                remoteScreenShares:
+                  action.count ?? action.streams?.length ?? state.voice.media.remoteScreenShares,
+              },
+            }
+          : state.voice,
+      }
     case 'voice.leave':
       return {
         ...state,
         voice: {
           ...state.voice,
           connectedChannelId: null,
+          connectionStatus: 'idle',
+          errorMessage: null,
           selfMute: false,
           selfDeaf: false,
+          media: null,
           participants: state.voice.participants.filter((participant) => !participant.self),
         },
       }
@@ -470,6 +766,18 @@ export function messagesForChannel(state: MobileAppState, channelId = state.sele
   return state.messages.filter((message) => message.channelId === channelId)
 }
 
+export function mobileMediaPermissionRows(state: MobileAppState): MobileMediaPermissionRow[] {
+  return mediaPermissionRows.map((row) => {
+    const status = state.mediaPermissions[row.kind]
+
+    return {
+      ...row,
+      status,
+      canRequest: status === 'promptable' || status === 'denied',
+    }
+  })
+}
+
 export function mobileVoiceParticipantsForChannel(
   state: MobileAppState,
   channelId = state.voice.connectedChannelId,
@@ -495,6 +803,20 @@ export function mobileCanSpeakInVoice(state: MobileAppState) {
   return Boolean(state.voice.connectedChannelId && !state.voice.selfMute && !state.voice.selfDeaf)
 }
 
+export function mobileCanJoinVoice(state: MobileAppState) {
+  return state.mediaPermissions.microphone === 'granted'
+}
+
+export function mobileChannelsFromApiChannels(channels: Channel[]): MobileChannel[] {
+  return channels.map((channel) => ({
+    id: channel.id,
+    kind: channel.kind,
+    name: channel.name,
+    topic: channel.topic ?? (channel.kind === 'voice' ? 'Voice channel' : ''),
+    unread: false,
+  }))
+}
+
 export function selectedChannel(state: MobileAppState) {
   return (
     state.channels.find((channel) => channel.id === state.selectedChannelId) ?? state.channels[0]
@@ -505,9 +827,9 @@ export function activeMobileServerConnection(state: MobileAppState) {
   return activeServerConnection(state.serverConnections)
 }
 
-function createDefaultMobileServerConnectionState() {
+function createDefaultMobileServerConnectionState(defaultServerUrl = DEFAULT_MOBILE_OPENCORD_SERVER_URL) {
   return createDefaultServerConnectionState({
-    baseUrl: DEFAULT_MOBILE_OPENCORD_SERVER_URL,
+    baseUrl: defaultServerUrl,
     displayName: 'Local OpenCord',
   })
 }
@@ -579,6 +901,93 @@ function messageFromRealtimeEnvelope(envelope: RealtimeIncomingEnvelope): Mobile
     embeds,
     time: timeLabel(envelope.occurred_at),
     own: false,
+  }
+}
+
+function applyMobileMediaPermissionRevocation(
+  state: MobileAppState,
+  envelope: RealtimeIncomingEnvelope,
+): MobileAppState {
+  if (envelope.type !== 'media.permission_revoked' || !('data' in envelope)) {
+    return state
+  }
+
+  const media = state.voice.media
+  const data = objectValue(envelope.data)
+  const grants = objectValue(data.grants)
+  const channelId = stringValue(data.channel_id) ?? envelope.scope.channel_id
+  const targetKind = stringValue(data.target_kind)
+  const targetId = stringValue(data.target_id)
+  if (
+    !media ||
+    !state.voice.connectedChannelId ||
+    channelId !== state.voice.connectedChannelId ||
+    targetKind !== 'member' ||
+    targetId !== media.participantIdentity
+  ) {
+    return state
+  }
+
+  if (data.action === 'disconnect' || grants.can_subscribe === false) {
+    return {
+      ...state,
+      voice: {
+        ...state.voice,
+        connectedChannelId: null,
+        connectionStatus: 'blocked',
+        errorMessage: 'Voice access changed. You were removed from the channel.',
+        selfMute: false,
+        selfDeaf: false,
+        media: null,
+        participants: state.voice.participants.filter((participant) => !participant.self),
+      },
+    }
+  }
+
+  let errorMessage = state.voice.errorMessage
+  let selfMute = state.voice.selfMute
+  let nextMedia = media
+  let participants = state.voice.participants
+  if (grants.can_publish_audio === false && media.canPublishAudio) {
+    selfMute = true
+    nextMedia = {
+      ...nextMedia,
+      canPublishAudio: false,
+    }
+    participants = updateMobileSelfVoiceStatus(
+      {
+        ...state.voice,
+        selfMute,
+        participants,
+      },
+      {
+        selfDeaf: state.voice.selfDeaf,
+        selfMute,
+      },
+    )
+    errorMessage = 'Voice permissions changed. Your microphone was muted.'
+  }
+  if (grants.can_publish_screen === false && media.canPublishScreen) {
+    nextMedia = {
+      ...nextMedia,
+      canPublishScreen: false,
+    }
+    errorMessage = 'Voice permissions changed. Screen sharing stopped.'
+  }
+
+  if (nextMedia === media && selfMute === state.voice.selfMute) {
+    return state
+  }
+
+  return {
+    ...state,
+    voice: {
+      ...state.voice,
+      errorMessage,
+      selfMute,
+      media: nextMedia,
+      participants,
+    },
   }
 }
 

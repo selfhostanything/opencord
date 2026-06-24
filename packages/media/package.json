@@ -1,0 +1,27 @@
+{
+  "type": "module",
+  "name": "@opencord/media",
+  "version": "0.0.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "test": "vitest run",
+    "build": "tsc -p tsconfig.json",
+    "lint": "tsc -p tsconfig.json --noEmit"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    }
+  },
+  "devDependencies": {
+    "typescript": "~6.0.3",
+    "vitest": "^4.1.9"
+  },
+  "dependencies": {
+    "livekit-client": "2.19.2"
+  }
+}

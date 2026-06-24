@@ -24,6 +24,17 @@ export type DesktopRuntimeOptions = {
   versions?: Partial<NodeJS.ProcessVersions>
 }
 
+export type DesktopCommandLineSwitch = {
+  name: string
+  value?: string
+}
+
+export type DesktopMediaAutomationConfig = {
+  commandLineSwitches: DesktopCommandLineSwitch[]
+  enabled: boolean
+  preferredSourceName: string | null
+}
+
 export function resolveRendererEntry({
   env = process.env,
   repoRoot,
@@ -62,6 +73,28 @@ export function createMainWindowOptions(preload: string): BrowserWindowConstruct
   }
 }
 
+export function desktopMediaAutomationConfig(
+  env: Partial<Record<string, string | undefined>> = process.env,
+): DesktopMediaAutomationConfig {
+  if (env.OPENCORD_DESKTOP_E2E_MEDIA !== '1') {
+    return {
+      commandLineSwitches: [],
+      enabled: false,
+      preferredSourceName: null,
+    }
+  }
+
+  return {
+    commandLineSwitches: [
+      { name: 'use-fake-ui-for-media-stream' },
+      { name: 'use-fake-device-for-media-stream' },
+      { name: 'autoplay-policy', value: 'no-user-gesture-required' },
+    ],
+    enabled: true,
+    preferredSourceName: trimmedString(env.OPENCORD_DESKTOP_E2E_SCREEN_SOURCE),
+  }
+}
+
 export function desktopRuntimeInfo(options: DesktopRuntimeOptions = {}): DesktopRuntimeInfo {
   const versions = options.versions ?? process.versions
 
@@ -73,4 +106,8 @@ export function desktopRuntimeInfo(options: DesktopRuntimeOptions = {}): Desktop
       node: versions.node ?? 'unknown',
     },
   }
+}
+
+function trimmedString(value: string | undefined) {
+  return value?.trim() || null
 }

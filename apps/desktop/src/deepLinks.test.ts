@@ -5,6 +5,7 @@ import {
   firstDesktopDeepLinkArg,
   isDesktopDeepLinkRoute,
   parseDesktopDeepLinkRoute,
+  parseDesktopNotificationRoute,
 } from './deepLinks'
 
 describe('desktop deep links', () => {
@@ -58,5 +59,39 @@ describe('desktop deep links', () => {
     expect(isDesktopDeepLinkRoute({ routePath: 'https://example.com', target: {} })).toBe(false)
     expect(isDesktopDeepLinkRoute({ routePath: '/settings', target: { panel: 'notifications' } }))
       .toBe(false)
+  })
+
+  it('parses notification tap links into renderer-safe route paths', () => {
+    expect(
+      parseDesktopNotificationRoute(
+        'opencord://notification?kind=message&serverId=local-opencord&organizationId=org-1&spaceId=space-1&channelId=general&messageId=msg-1',
+      ),
+    ).toEqual({
+      routePath: '/servers/local-opencord/spaces/space-1/channels/general?messageId=msg-1',
+      target: {
+        kind: 'message',
+        serverId: 'local-opencord',
+        organizationId: 'org-1',
+        spaceId: 'space-1',
+        channelId: 'general',
+        messageId: 'msg-1',
+      },
+    })
+
+    expect(
+      parseDesktopNotificationRoute(
+        'https://chat.example.com/notification?kind=meeting&meetingId=meeting-roadmap-review',
+      ),
+    ).toEqual({
+      routePath: '/meetings/meeting-roadmap-review',
+      target: {
+        kind: 'meeting',
+        meetingId: 'meeting-roadmap-review',
+      },
+    })
+    expect(parseDesktopNotificationRoute('opencord://route?kind=message&channelId=general'))
+      .toBeNull()
+    expect(parseDesktopNotificationRoute('opencord://notification?kind=settings&panel=developer'))
+      .toBeNull()
   })
 })

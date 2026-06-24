@@ -17,6 +17,7 @@ type MessageNotificationPayload = {
   authorName: string
   body: string
   own: boolean
+  notificationLink?: string
 }
 
 const MESSAGE_NOTIFICATION_CHANNEL = 'opencord:notification:message'
@@ -89,7 +90,8 @@ function isMessageNotificationPayload(value: unknown): value is MessageNotificat
     isNonEmptyString(value.channelName) &&
     isNonEmptyString(value.authorName) &&
     isNonEmptyString(value.body) &&
-    typeof value.own === 'boolean'
+    typeof value.own === 'boolean' &&
+    optionalNotificationLinkIsValid(value.notificationLink)
   )
 }
 
@@ -99,4 +101,25 @@ function isObject(value: unknown): value is Record<string, unknown> {
 
 function isNonEmptyString(value: unknown) {
   return typeof value === 'string' && value.trim().length > 0
+}
+
+function optionalNotificationLinkIsValid(value: unknown) {
+  if (value === undefined) {
+    return true
+  }
+  if (typeof value !== 'string') {
+    return false
+  }
+
+  try {
+    const url = new URL(value)
+    const isOpenCordNotification = url.protocol === 'opencord:' && url.host === 'notification'
+    const isUniversalNotification =
+      (url.protocol === 'https:' || url.protocol === 'http:') &&
+      url.pathname.replace(/\/+$/, '') === '/notification'
+
+    return isOpenCordNotification || isUniversalNotification
+  } catch {
+    return false
+  }
 }

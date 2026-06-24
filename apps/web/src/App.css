@@ -728,6 +728,28 @@ button {
   background: #343434;
 }
 
+.settings-tab-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.settings-tab-row button {
+  min-height: 32px;
+  border: 1px solid #343434;
+  border-radius: 6px;
+  color: #cdd3ca;
+  background: #171717;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.settings-tab-row button[aria-selected="true"] {
+  border-color: #28796d;
+  color: #dff7ed;
+  background: #1f302c;
+}
+
 .device-permission-list {
   display: grid;
   gap: 8px;
@@ -757,7 +779,13 @@ button {
   line-height: 1.35;
 }
 
-.device-permission-row span {
+.device-permission-status {
+  display: grid;
+  justify-items: end;
+  gap: 6px;
+}
+
+.device-permission-status span {
   max-width: 92px;
   padding: 5px 7px;
   border: 1px solid #365049;
@@ -768,6 +796,17 @@ button {
   font-weight: 800;
   line-height: 1.2;
   text-align: right;
+}
+
+.device-permission-status button {
+  min-height: 28px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 6px;
+  color: #ffffff;
+  background: #28796d;
+  font-size: 11px;
+  font-weight: 800;
 }
 
 .chat-panel {

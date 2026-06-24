@@ -50,6 +50,31 @@ export function parseDesktopDeepLinkRoute(value: string): DesktopDeepLinkRoute |
   return routePath ? { routePath, target } : null
 }
 
+export function parseDesktopNotificationRoute(value: string): DesktopDeepLinkRoute | null {
+  let url: URL
+  try {
+    url = new URL(value)
+  } catch {
+    return null
+  }
+
+  const isOpenCordNotification = url.protocol === 'opencord:' && url.host === 'notification'
+  const isUniversalNotification =
+    (url.protocol === 'https:' || url.protocol === 'http:') &&
+    url.pathname.replace(/\/+$/, '') === '/notification'
+  if (!isOpenCordNotification && !isUniversalNotification) {
+    return null
+  }
+
+  const target = routeTargetFromParams(url.searchParams)
+  if (!target || !isNotificationRouteTarget(target)) {
+    return null
+  }
+
+  const routePath = routePathForDesktopTarget(target)
+  return routePath ? { routePath, target } : null
+}
+
 export function firstDesktopDeepLinkArg(argv: readonly string[]) {
   return argv.find((arg) => parseDesktopDeepLinkRoute(arg) !== null) ?? null
 }
@@ -144,6 +169,15 @@ function routeTargetFromParams(params: URLSearchParams): DesktopRouteTarget | nu
     default:
       return null
   }
+}
+
+function isNotificationRouteTarget(target: DesktopRouteTarget) {
+  return (
+    target.kind === 'server' ||
+    target.kind === 'channel' ||
+    target.kind === 'message' ||
+    target.kind === 'meeting'
+  )
 }
 
 function routePathForDesktopTarget(target: DesktopRouteTarget) {

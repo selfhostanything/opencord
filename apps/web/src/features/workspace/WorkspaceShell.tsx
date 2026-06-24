@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { FormEvent, RefObject } from 'react'
+import type { FormEvent, ReactNode, RefObject } from 'react'
 import {
   createOpenCordApiClient,
   OpenCordApiError,
@@ -41,6 +41,7 @@ import {
   type DeviceSessionStores,
   type ServerConnection,
 } from '@opencord/server-connections'
+import type { OpenCordSettingsPanel } from '@opencord/client-contracts'
 
 import { WorkspaceLayout } from '../../layouts/WorkspaceLayout'
 import { useWorkspaceUiStore } from './state/workspaceUiStore'
@@ -233,6 +234,18 @@ type OpenCordDesktopRuntime = {
     getSecret(key: string): Promise<string | null>
     removeSecret(key: string): Promise<boolean>
     setSecret(key: string, value: string): Promise<boolean>
+  }
+  deepLinks?: {
+    onRoute(handler: (route: { routePath: string; target: { kind: string } }) => void): () => void
+  }
+  notifications?: {
+    showMessage(payload: {
+      authorName: string
+      body: string
+      channelName: string
+      notificationLink?: string
+      own: boolean
+    }): Promise<boolean>
   }
   platform: string
   versions?: {
@@ -473,11 +486,13 @@ function meetingRoomStateForMeeting(meeting: CalendarMeeting): MeetingRoomState 
 type WorkspaceShellProps = {
   initialMeetingId?: string
   initialPanel?: ActivePanel
+  initialSettingsPanel?: OpenCordSettingsPanel
 }
 
 export function WorkspaceShell({
   initialMeetingId,
   initialPanel = 'chat',
+  initialSettingsPanel,
 }: WorkspaceShellProps) {
   const [serverConnections, setServerConnections] = useState(() =>
     loadBrowserServerConnectionState(),
@@ -499,6 +514,8 @@ export function WorkspaceShell({
   const [pendingAttachments, setPendingAttachments] = useState<MessageAttachment[]>([])
   const [showChannelForm, setShowChannelForm] = useState(false)
   const [showUserSettings, setShowUserSettings] = useState(false)
+  const [activeUserSettingsPanel, setActiveUserSettingsPanel] =
+    useState<OpenCordSettingsPanel>(initialSettingsPanel ?? 'voice-video')
   const [newChannelName, setNewChannelName] = useState('')
   const [editingMessage, setEditingMessage] = useState<{ id: string; body: string } | null>(null)
   const [voiceState, setVoiceState] = useState(initialVoiceState)
@@ -857,6 +874,15 @@ export function WorkspaceShell({
       setMeetingRoom(null)
     }
   }, [initialMeetingId, initialPanel])
+
+  useEffect(() => {
+    if (!initialSettingsPanel) {
+      return
+    }
+
+    setActiveUserSettingsPanel(initialSettingsPanel)
+    setShowUserSettings(true)
+  }, [initialSettingsPanel])
 
   useEffect(() => {
     saveBrowserServerConnectionState(serverConnections)
@@ -2283,8 +2309,10 @@ export function WorkspaceShell({
         </div>
         {showUserSettings ? (
           <UserSettingsPanel
+            activePanel={activeUserSettingsPanel}
             desktopRuntime={desktopRuntime}
             onClose={() => setShowUserSettings(false)}
+            onSelectPanel={setActiveUserSettingsPanel}
           />
         ) : null}
       </nav>
@@ -2535,11 +2563,15 @@ export function WorkspaceShell({
 }
 
 function UserSettingsPanel({
+  activePanel,
   desktopRuntime,
   onClose,
+  onSelectPanel,
 }: {
+  activePanel: OpenCordSettingsPanel
   desktopRuntime: OpenCordDesktopRuntime | null
   onClose: () => void
+  onSelectPanel: (panel: OpenCordSettingsPanel) => void
 }) {
   const isMacDesktop = desktopRuntime?.platform === 'darwin'
   const platformLabel = desktopRuntime
@@ -2547,48 +2579,119 @@ function UserSettingsPanel({
       ? 'macOS desktop'
       : `${desktopRuntime.platform} desktop`
     : 'web browser'
+  const visiblePanel = activePanel === 'notifications' ? 'notifications' : 'voice-video'
+  const [notificationPermission, setNotificationPermission] =
+    useState<WebNotificationPermissionState>(() => currentWebNotificationPermission())
+
+  async function requestNotifications() {
+    if (typeof window === 'undefined' || !('Notification' in window)) {
+      setNotificationPermission('unsupported')
+      return
+    }
+    if (Notification.permission !== 'default') {
+      setNotificationPermission(webNotificationPermissionFromBrowser(Notification.permission))
+      return
+    }
+
+    const permission = await Notification.requestPermission()
+    setNotificationPermission(webNotificationPermissionFromBrowser(permission))
+  }
 
   return (
-    <section className="user-settings-popover" aria-label="Voice & Video settings">
+    <section
+      className="user-settings-popover"
+      aria-label={visiblePanel === 'notifications' ? 'Notification settings' : 'Voice & Video settings'}
+    >
       <header>
         <div>
-          <h2>Voice & Video</h2>
+          <h2>{visiblePanel === 'notifications' ? 'Notifications' : 'Voice & Video'}</h2>
           <p>{platformLabel}</p>
         </div>
         <button type="button" aria-label="Close user settings" onClick={onClose}>
           Close
         </button>
       </header>
-      <div className="device-permission-list">
-        <DevicePermissionRow
-          label="Microphone"
-          status="Ask before join"
-          detail="Used to publish your voice only while you are connected to a voice channel or meeting."
-        />
-        <DevicePermissionRow
-          label="Screen share"
-          status={isMacDesktop ? 'Requires macOS System Settings' : 'Ask before share'}
-          detail={
-            isMacDesktop
-              ? 'Used only while sharing; macOS System Settings controls screen recording access for OpenCord.'
-              : 'Used only while you publish a display track; browser access is requested for each share.'
-          }
-        />
-        <DevicePermissionRow
-          label="Speaker output"
-          status="No publish access"
-          detail="Used to play remote voice and meeting audio from other participants."
-        />
+      <div className="settings-tab-row" role="tablist" aria-label="User settings sections">
+        <button
+          aria-selected={visiblePanel === 'voice-video'}
+          onClick={() => onSelectPanel('voice-video')}
+          role="tab"
+          type="button"
+        >
+          Voice
+        </button>
+        <button
+          aria-selected={visiblePanel === 'notifications'}
+          onClick={() => onSelectPanel('notifications')}
+          role="tab"
+          type="button"
+        >
+          Notifications
+        </button>
       </div>
+      {visiblePanel === 'notifications' ? (
+        <div className="device-permission-list">
+          <DevicePermissionRow
+            label="Browser notifications"
+            status={webNotificationPermissionLabel(notificationPermission)}
+            detail="Used for mentions, meeting reminders, and incoming call alerts while this client is running."
+            action={
+              notificationPermission === 'promptable' ? (
+                <button type="button" onClick={requestNotifications}>
+                  Grant
+                </button>
+              ) : null
+            }
+          />
+          <DevicePermissionRow
+            label="Notification tap routing"
+            status={desktopRuntime ? 'Desktop ready' : 'Web ready'}
+            detail={
+              desktopRuntime
+                ? 'Electron notification clicks route to the matching server, channel, message, or meeting.'
+                : 'Web notification clicks use the same route target when a service worker/provider relay is configured.'
+            }
+          />
+          <DevicePermissionRow
+            label="Provider delivery"
+            status="Not configured"
+            detail="Production push delivery needs Web Push credentials plus APNs or FCM on native clients."
+          />
+        </div>
+      ) : (
+        <div className="device-permission-list">
+          <DevicePermissionRow
+            label="Microphone"
+            status="Ask before join"
+            detail="Used to publish your voice only while you are connected to a voice channel or meeting."
+          />
+          <DevicePermissionRow
+            label="Screen share"
+            status={isMacDesktop ? 'Requires macOS System Settings' : 'Ask before share'}
+            detail={
+              isMacDesktop
+                ? 'Used only while sharing; macOS System Settings controls screen recording access for OpenCord.'
+                : 'Used only while you publish a display track; browser access is requested for each share.'
+            }
+          />
+          <DevicePermissionRow
+            label="Speaker output"
+            status="No publish access"
+            detail="Used to play remote voice and meeting audio from other participants."
+          />
+        </div>
+      )}
     </section>
   )
 }
 
 function DevicePermissionRow({
+  action,
   detail,
   label,
   status,
 }: {
+  action?: ReactNode
   detail: string
   label: string
   status: string
@@ -2599,7 +2702,10 @@ function DevicePermissionRow({
         <strong>{label}</strong>
         <p>{detail}</p>
       </div>
-      <span>{status}</span>
+      <div className="device-permission-status">
+        <span>{status}</span>
+        {action}
+      </div>
     </article>
   )
 }
@@ -3892,6 +3998,42 @@ function getOpenCordDesktopRuntime(): OpenCordDesktopRuntime | null {
   }
 
   return runtime
+}
+
+type WebNotificationPermissionState = 'blocked' | 'granted' | 'promptable' | 'unsupported'
+
+function currentWebNotificationPermission(): WebNotificationPermissionState {
+  if (typeof window === 'undefined' || !('Notification' in window)) {
+    return 'unsupported'
+  }
+
+  return webNotificationPermissionFromBrowser(Notification.permission)
+}
+
+function webNotificationPermissionFromBrowser(
+  permission: NotificationPermission,
+): WebNotificationPermissionState {
+  switch (permission) {
+    case 'granted':
+      return 'granted'
+    case 'denied':
+      return 'blocked'
+    case 'default':
+      return 'promptable'
+  }
+}
+
+function webNotificationPermissionLabel(permission: WebNotificationPermissionState) {
+  switch (permission) {
+    case 'granted':
+      return 'Granted'
+    case 'blocked':
+      return 'Blocked'
+    case 'promptable':
+      return 'Not granted'
+    case 'unsupported':
+      return 'Not supported'
+  }
 }
 
 function opencordMediaRtcConfig() {

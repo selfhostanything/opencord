@@ -140,9 +140,14 @@ export type OpenCordNotificationRoute = {
   id: string
   title: string
   body: string
-  target: OpenCordRouteTarget
+  target: OpenCordNotificationRouteTarget
   receivedAt: string
 }
+
+export type OpenCordNotificationRouteTarget = Extract<
+  OpenCordRouteTarget,
+  { kind: 'server' | 'channel' | 'message' | 'meeting' }
+>
 
 const settingsPanels = [
   'account',
@@ -257,6 +262,17 @@ export function buildOpenCordDeepLink(target: OpenCordRouteTarget) {
   return `opencord://route?${params.toString()}`
 }
 
+export function buildOpenCordNotificationDeepLink(target: OpenCordNotificationRouteTarget) {
+  const normalized = parseOpenCordNotificationRouteTarget(target)
+  if (!normalized) {
+    throw new Error('Invalid OpenCord notification route target.')
+  }
+
+  const params = new URLSearchParams()
+  appendTargetParams(params, normalized)
+  return `opencord://notification?${params.toString()}`
+}
+
 export function parseOpenCordDeepLink(value: string) {
   try {
     const url = new URL(value)
@@ -267,6 +283,61 @@ export function parseOpenCordDeepLink(value: string) {
     return parseOpenCordRouteTarget(Object.fromEntries(url.searchParams.entries()))
   } catch {
     return null
+  }
+}
+
+export function parseOpenCordNotificationDeepLink(value: string) {
+  try {
+    const url = new URL(value)
+    const isOpenCordNotification = url.protocol === 'opencord:' && url.host === 'notification'
+    const isUniversalNotification =
+      (url.protocol === 'https:' || url.protocol === 'http:') &&
+      url.pathname.replace(/\/+$/, '') === '/notification'
+
+    if (!isOpenCordNotification && !isUniversalNotification) {
+      return null
+    }
+
+    return parseOpenCordNotificationRouteTarget(Object.fromEntries(url.searchParams.entries()))
+  } catch {
+    return null
+  }
+}
+
+export function parseOpenCordNotificationRoute(value: unknown): OpenCordNotificationRoute | null {
+  const payload = objectValue(value)
+  if (!payload) {
+    return null
+  }
+
+  const id = nonEmptyStringValue(payload.id)
+  const title = nonEmptyStringValue(payload.title)
+  const body = nonEmptyStringValue(payload.body)
+  const receivedAt = nonEmptyStringValue(payload.receivedAt)
+  const target = parseOpenCordNotificationRouteTarget(payload.target)
+  if (!id || !title || !body || !receivedAt || !target) {
+    return null
+  }
+
+  return { id, title, body, receivedAt, target }
+}
+
+export function parseOpenCordNotificationRouteTarget(
+  value: unknown,
+): OpenCordNotificationRouteTarget | null {
+  const target = parseOpenCordRouteTarget(value)
+  if (!target) {
+    return null
+  }
+
+  switch (target.kind) {
+    case 'server':
+    case 'channel':
+    case 'message':
+    case 'meeting':
+      return target
+    default:
+      return null
   }
 }
 

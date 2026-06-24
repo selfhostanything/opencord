@@ -48,7 +48,11 @@ import {
   persistDeviceSession,
   type ServerConnection,
 } from '@opencord/server-connections'
-import type { OpenCordSettingsPanel } from '@opencord/client-contracts'
+import {
+  buildOpenCordNotificationDeepLink,
+  type OpenCordNotificationRouteTarget,
+  type OpenCordSettingsPanel,
+} from '@opencord/client-contracts'
 
 import {
   activeMobileServerConnection,
@@ -72,6 +76,7 @@ import {
   mobileReducer,
   mobileVoiceParticipantsForChannel,
   selectedChannel,
+  type MobileAppState,
   type MobileChannel,
   type MobileMemberRow,
   type MobileMessageActionId,
@@ -99,7 +104,10 @@ import {
   type MobilePendingAttachment,
 } from './src/mobileStores'
 import { createMobileDeviceSessionStores } from './src/mobileDeviceSessionStorage'
-import { mobileMeetingIdFromUrl } from './src/mobileDeepLinks'
+import {
+  mobileMeetingIdFromUrl,
+  mobileNotificationRouteTargetFromUrl,
+} from './src/mobileDeepLinks'
 import {
   mobileE2ECommandFromUrl,
   mobileE2EStateUrl,
@@ -239,6 +247,7 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [serverManagerOpen, setServerManagerOpen] = useState(false)
   const [settingsFeedback, setSettingsFeedback] = useState<string | null>(null)
+  const [notificationRouteStatus, setNotificationRouteStatus] = useState('No local tap routed yet.')
   const [logoutStatus, setLogoutStatus] = useState<'idle' | 'loading'>('idle')
   const [activeDeviceSessionSaved, setActiveDeviceSessionSaved] = useState(false)
   const [developerStatus, setDeveloperStatus] = useState<'idle' | 'loading'>('idle')
@@ -1388,7 +1397,81 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
       return
     }
 
+    if (openMobileNotificationRouteFromUrl(normalizedUrl)) {
+      return
+    }
+
     openMobileMeetingFromUrl(normalizedUrl)
+  }
+
+  function openMobileNotificationRouteFromUrl(url: string) {
+    const routeTarget = mobileNotificationRouteTargetFromUrl(url)
+    if (!routeTarget) {
+      return false
+    }
+
+    routeMobileNotificationTarget(routeTarget)
+    return true
+  }
+
+  function routeMobileNotificationTarget(routeTarget: OpenCordNotificationRouteTarget) {
+    setMobileRouteTarget(routeTarget)
+    setSettingsOpen(false)
+    setMemberDrawerOpen(false)
+    setSearchOpen(false)
+
+    switch (routeTarget.kind) {
+      case 'server':
+        setNotificationRouteStatus(`Opened server ${shortIdentifier(routeTarget.serverId)}.`)
+        setChatFeedback('Opened notification server route.')
+        return
+      case 'channel': {
+        const channel = stateRef.current.channels.find(
+          (candidate) => candidate.id === routeTarget.channelId,
+        )
+        if (channel) {
+          dispatch({ type: 'channel.select', channelId: channel.id })
+          setNotificationRouteStatus(`Opened #${channel.name}.`)
+          setChatFeedback(`Opened notification for #${channel.name}.`)
+          return
+        }
+
+        setNotificationRouteStatus(`Channel ${shortIdentifier(routeTarget.channelId)} not synced.`)
+        setChatFeedback('Notification channel is not synced on this device yet.')
+        return
+      }
+      case 'message': {
+        const message = stateRef.current.messages.find(
+          (candidate) => candidate.id === routeTarget.messageId,
+        )
+        if (message) {
+          dispatch({ type: 'channel.select', channelId: message.channelId })
+          setHighlightedMessageId(message.id)
+          setNotificationRouteStatus(`Opened message ${shortIdentifier(message.id)}.`)
+          setChatFeedback('Opened notification message.')
+          return
+        }
+
+        setNotificationRouteStatus(`Message ${shortIdentifier(routeTarget.messageId)} not synced.`)
+        setChatFeedback('Notification message is not synced on this device yet.')
+        return
+      }
+      case 'meeting': {
+        const meeting = useMobileMeetingsStore
+          .getState()
+          .meetings.find((candidate) => candidate.id === routeTarget.meetingId)
+        if (meeting) {
+          openMobileMeetingDetail(meeting)
+          setNotificationRouteStatus(`Opened meeting ${meeting.title}.`)
+          return
+        }
+
+        setMeetingPanelOpen(true)
+        setMeetingFeedback('Meeting notification received. Sync meetings to finish routing.')
+        setNotificationRouteStatus(`Meeting ${shortIdentifier(routeTarget.meetingId)} not synced.`)
+        return
+      }
+    }
   }
 
   function openMobileMeetingFromUrl(url: string) {
@@ -1535,6 +1618,18 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
     setMemberDrawerOpen(false)
     setSearchOpen(false)
     setChatFeedback(`Jumped to #${state.channels.find((channel) => channel.id === message.channelId)?.name ?? 'channel'}.`)
+  }
+
+  function runLocalNotificationRouteHarness() {
+    const routeTarget = mobileNotificationTargetForCurrentContext(state)
+    if (!routeTarget) {
+      setNotificationRouteStatus('No routeable channel or message is available.')
+      return
+    }
+
+    const notificationLink = buildOpenCordNotificationDeepLink(routeTarget)
+    const separator = notificationLink.includes('?') ? '&' : '?'
+    handleIncomingUrl(`${notificationLink}${separator}tapId=${Date.now()}`)
   }
 
   function toggleVoiceSettings() {
@@ -2049,6 +2144,7 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
                 hasSavedDeviceSession={activeDeviceSessionSaved}
                 logoutStatus={logoutStatus}
                 maxHeight={permissionPanelMaxHeight}
+                notificationRouteStatus={notificationRouteStatus}
                 onClearSavedLogin={() => {
                   void clearSavedMobileLogin()
                 }}
@@ -2087,6 +2183,7 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
                   void rotateMobileDeveloperWebhookToken(webhookId)
                 }}
                 onSelectPanel={openMobileSettingsPanel}
+                onTestNotificationRoute={runLocalNotificationRouteHarness}
                 onWebhookNameChange={setDeveloperWebhookName}
                 rows={permissionRows}
                 serverUrl={state.serverUrl}
@@ -2225,6 +2322,7 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
           hasSavedDeviceSession={activeDeviceSessionSaved}
           logoutStatus={logoutStatus}
           maxHeight={permissionPanelMaxHeight}
+          notificationRouteStatus={notificationRouteStatus}
           onClearSavedLogin={() => {
             void clearSavedMobileLogin()
           }}
@@ -2263,6 +2361,7 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
             void rotateMobileDeveloperWebhookToken(webhookId)
           }}
           onSelectPanel={openMobileSettingsPanel}
+          onTestNotificationRoute={runLocalNotificationRouteHarness}
           onWebhookNameChange={setDeveloperWebhookName}
           rows={permissionRows}
           serverUrl={state.serverUrl}
@@ -3289,6 +3388,7 @@ function MobileSettingsPanel({
   hasSavedDeviceSession,
   logoutStatus,
   maxHeight,
+  notificationRouteStatus,
   onBotNameChange,
   onClearSavedLogin,
   onClose,
@@ -3305,6 +3405,7 @@ function MobileSettingsPanel({
   onRotateBotToken,
   onRotateWebhookToken,
   onSelectPanel,
+  onTestNotificationRoute,
   onWebhookNameChange,
   rows,
   serverUrl,
@@ -3327,6 +3428,7 @@ function MobileSettingsPanel({
   hasSavedDeviceSession: boolean
   logoutStatus: 'idle' | 'loading'
   maxHeight: number
+  notificationRouteStatus: string
   onBotNameChange: (name: string) => void
   onClearSavedLogin: () => void
   onClose: () => void
@@ -3343,6 +3445,7 @@ function MobileSettingsPanel({
   onRotateBotToken: (applicationId: string) => void
   onRotateWebhookToken: (webhookId: string) => void
   onSelectPanel: (panel: OpenCordSettingsPanel) => void
+  onTestNotificationRoute: () => void
   onWebhookNameChange: (name: string) => void
   rows: MobileMediaPermissionRow[]
   serverUrl: string
@@ -3458,6 +3561,24 @@ function MobileSettingsPanel({
           onRequest={onRequest}
           rows={permissionRows}
         />
+      ) : null}
+      {visiblePanel === 'notifications' ? (
+        <View style={styles.settingsSection}>
+          <SettingsInfoRow
+            detail="Routes through the same server, channel, message, and meeting target parser used by native notification taps."
+            label="Local tap route"
+            value={notificationRouteStatus}
+          />
+          <View style={styles.settingsActionRow}>
+            <Pressable
+              accessibilityRole="button"
+              onPress={onTestNotificationRoute}
+              style={styles.secondarySettingsButton}
+            >
+              <Text style={styles.primaryButtonText}>Test route</Text>
+            </Pressable>
+          </View>
+        </View>
       ) : null}
       {visiblePanel === 'appearance' ? (
         <View style={styles.settingsSection}>
@@ -4659,6 +4780,23 @@ function incomingWebhookDetailFromShownToken(webhook: IncomingWebhookWithToken):
     tokenLastFour: webhook.tokenLastFour,
     createdAt: webhook.createdAt,
   }
+}
+
+function mobileNotificationTargetForCurrentContext(
+  state: MobileAppState,
+): OpenCordNotificationRouteTarget | null {
+  const selectedMessage = [...state.messages]
+    .reverse()
+    .find((message) => message.channelId === state.selectedChannelId)
+  const messageTarget = selectedMessage
+    ? mobileRouteTargetForMessage(state, selectedMessage.id)
+    : null
+  if (messageTarget?.kind === 'message') {
+    return messageTarget
+  }
+
+  const channelTarget = mobileRouteTargetForChannel(state)
+  return channelTarget?.kind === 'channel' ? channelTarget : null
 }
 
 function shortIdentifier(value?: string | null) {

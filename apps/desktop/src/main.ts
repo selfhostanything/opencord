@@ -33,6 +33,7 @@ import {
   MESSAGE_NOTIFICATION_CHANNEL,
   buildMessageNotification,
   isMessageNotificationPayload,
+  notificationClickRouteFromPayload,
   shouldShowMessageNotification,
 } from './notifications'
 
@@ -70,7 +71,14 @@ ipcMain.handle(MESSAGE_NOTIFICATION_CHANNEL, (_event, payload: unknown) => {
     return false
   }
 
-  new Notification(buildMessageNotification(payload)).show()
+  const notification = new Notification(buildMessageNotification(payload))
+  const clickRoute = notificationClickRouteFromPayload(payload)
+  if (clickRoute) {
+    notification.on('click', () => {
+      routeDesktopWindow(clickRoute)
+    })
+  }
+  notification.show()
   return true
 })
 
@@ -258,6 +266,20 @@ function captureDesktopDeepLink(value: string | null) {
 
   pendingDeepLinkRoute = route
   return true
+}
+
+function routeDesktopWindow(route: DesktopDeepLinkRoute) {
+  pendingDeepLinkRoute = route
+  if (!mainWindow) {
+    return
+  }
+
+  if (mainWindow.isMinimized()) {
+    mainWindow.restore()
+  }
+  mainWindow.show()
+  mainWindow.focus()
+  flushPendingDeepLinkRoute(mainWindow)
 }
 
 function flushPendingDeepLinkRoute(window: BrowserWindow) {

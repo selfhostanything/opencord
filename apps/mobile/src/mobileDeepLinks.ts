@@ -1,3 +1,14 @@
+import {
+  parseOpenCordNotificationDeepLink,
+  type OpenCordNotificationRouteTarget,
+} from '@opencord/client-contracts'
+
+export function mobileNotificationRouteTargetFromUrl(
+  value: string,
+): OpenCordNotificationRouteTarget | null {
+  return parseOpenCordNotificationDeepLink(value)
+}
+
 export function mobileMeetingIdFromUrl(value: string) {
   const parsed = parseUrl(value)
   if (!parsed) {

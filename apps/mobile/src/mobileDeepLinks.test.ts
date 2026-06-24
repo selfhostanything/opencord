@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { mobileMeetingIdFromUrl } from './mobileDeepLinks'
+import { mobileMeetingIdFromUrl, mobileNotificationRouteTargetFromUrl } from './mobileDeepLinks'
 
 describe('mobile deep links', () => {
   it('extracts meeting ids from OpenCord custom scheme routes', () => {
@@ -30,5 +30,29 @@ describe('mobile deep links', () => {
   it('ignores non-meeting links', () => {
     expect(mobileMeetingIdFromUrl('opencord://media/leave')).toBeNull()
     expect(mobileMeetingIdFromUrl('not a url')).toBeNull()
+  })
+
+  it('extracts notification route targets for mobile tap routing', () => {
+    expect(
+      mobileNotificationRouteTargetFromUrl(
+        'opencord://notification?kind=message&serverId=local-opencord&spaceId=space-1&channelId=general&messageId=msg-1',
+      ),
+    ).toEqual({
+      kind: 'message',
+      serverId: 'local-opencord',
+      spaceId: 'space-1',
+      channelId: 'general',
+      messageId: 'msg-1',
+    })
+    expect(
+      mobileNotificationRouteTargetFromUrl(
+        'https://chat.example.com/notification?kind=meeting&meetingId=meeting-roadmap-review',
+      ),
+    ).toEqual({
+      kind: 'meeting',
+      meetingId: 'meeting-roadmap-review',
+    })
+    expect(mobileNotificationRouteTargetFromUrl('opencord://notification?kind=settings&panel=developer'))
+      .toBeNull()
   })
 })

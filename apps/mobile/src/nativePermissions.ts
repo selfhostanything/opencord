@@ -27,7 +27,7 @@ export async function queryNativeMediaPermissions(): Promise<Partial<MobileMedia
       camera: 'promptable',
       microphone: 'promptable',
       nativeCallIntegration: await queryNativeCallIntegrationStatus({ platform: Platform.OS }),
-      notifications: 'promptable',
+      notifications: Platform.OS === 'ios' ? 'system-settings-required' : 'unsupported',
       screenShare: Platform.OS === 'ios' ? 'system-settings-required' : 'unsupported',
       speaker: 'unsupported',
     }
@@ -42,7 +42,7 @@ export async function queryNativeMediaPermissions(): Promise<Partial<MobileMedia
     camera: cameraGranted ? 'granted' : 'promptable',
     microphone: microphoneGranted ? 'granted' : 'promptable',
     nativeCallIntegration: await queryNativeCallIntegrationStatus({ platform: Platform.OS }),
-    notifications: 'promptable',
+    notifications: await queryAndroidNotificationPermission(),
     screenShare: 'promptable',
     speaker: 'unsupported',
   }
@@ -80,7 +80,7 @@ async function requestAndroidMediaPermission(
     return 'promptable'
   }
   if (kind === 'notifications') {
-    return 'promptable'
+    return requestAndroidNotificationPermission()
   }
   if (kind === 'nativeCallIntegration') {
     return requestNativeCallIntegration({ platform: 'android' })
@@ -109,7 +109,7 @@ async function requestIosMediaPermission(
     return 'system-settings-required'
   }
   if (kind === 'notifications') {
-    return 'promptable'
+    return 'system-settings-required'
   }
   if (kind === 'nativeCallIntegration') {
     return requestNativeCallIntegration({ platform: 'ios' })
@@ -133,4 +133,33 @@ async function requestIosMediaPermission(
   } catch {
     return 'denied'
   }
+}
+
+async function queryAndroidNotificationPermission(): Promise<MobileMediaPermissionStatus> {
+  if (Number(Platform.Version) < 33) {
+    return 'granted'
+  }
+
+  const granted = await PermissionsAndroid.check(androidPostNotificationsPermission())
+  return granted ? 'granted' : 'promptable'
+}
+
+async function requestAndroidNotificationPermission(): Promise<MobileMediaPermissionStatus> {
+  if (Number(Platform.Version) < 33) {
+    return 'granted'
+  }
+
+  const result = await PermissionsAndroid.request(androidPostNotificationsPermission())
+  if (result === PermissionsAndroid.RESULTS.GRANTED) {
+    return 'granted'
+  }
+  if (result === PermissionsAndroid.RESULTS.NEVER_ASK_AGAIN) {
+    return 'system-settings-required'
+  }
+
+  return 'denied'
+}
+
+function androidPostNotificationsPermission() {
+  return 'android.permission.POST_NOTIFICATIONS' as Parameters<typeof PermissionsAndroid.check>[0]
 }

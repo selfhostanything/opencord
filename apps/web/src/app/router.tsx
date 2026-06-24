@@ -7,7 +7,9 @@ import {
 } from '@tanstack/react-router'
 import {
   buildOpenCordRoutePath,
+  parseOpenCordRouteTarget,
   type OpenCordRouteTarget,
+  type OpenCordSettingsPanel,
 } from '@opencord/client-contracts'
 
 import { WorkspaceShell } from '../features/workspace/WorkspaceShell'
@@ -66,6 +68,22 @@ const meetingShortcutRoute = createRoute({
   component: MeetingShortcutWorkspaceRoute,
 })
 
+const settingsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/settings',
+  validateSearch: (search: Record<string, unknown>): { panel: OpenCordSettingsPanel } => {
+    const target = parseOpenCordRouteTarget({
+      kind: 'settings',
+      panel: search.panel,
+      serverId: search.serverId,
+    })
+    return {
+      panel: target?.kind === 'settings' ? target.panel : 'voice-video',
+    }
+  },
+  component: SettingsWorkspaceRoute,
+})
+
 const routeTree = rootRoute.addChildren([
   indexRoute,
   channelRoute,
@@ -75,6 +93,7 @@ const routeTree = rootRoute.addChildren([
   developerShortcutRoute,
   meetingRoute,
   meetingShortcutRoute,
+  settingsRoute,
 ])
 
 export function createAppRouter(options: { history?: RouterHistory } = {}) {
@@ -115,4 +134,10 @@ function MeetingShortcutWorkspaceRoute() {
   const { meetingId } = meetingShortcutRoute.useParams()
 
   return <WorkspaceRoute meetingId={meetingId} panel="meeting" />
+}
+
+function SettingsWorkspaceRoute() {
+  const { panel } = settingsRoute.useSearch()
+
+  return <WorkspaceShell initialSettingsPanel={panel} initialPanel="chat" />
 }

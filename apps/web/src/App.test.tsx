@@ -90,6 +90,74 @@ describe('OpenCord web chat UI', () => {
     expect(screen.queryByRole('region', { name: 'Voice & Video settings' })).not.toBeInTheDocument()
   })
 
+  it('renders notification settings with browser permission state from the settings route', async () => {
+    const requestPermission = vi.fn(async () => 'granted' as NotificationPermission)
+    vi.stubGlobal('Notification', {
+      permission: 'default',
+      requestPermission,
+    })
+    const router = createAppRouter({
+      history: createMemoryHistory({
+        initialEntries: ['/settings?panel=notifications'],
+      }),
+    })
+
+    render(<App router={router} />)
+
+    const notificationSettings = await screen.findByRole('region', {
+      name: 'Notification settings',
+    })
+    expect(within(notificationSettings).getByRole('heading', { name: 'Notifications' }))
+      .toBeInTheDocument()
+    expect(notificationSettings).toHaveTextContent('Browser notifications')
+    expect(notificationSettings).toHaveTextContent('Not granted')
+    expect(notificationSettings).toHaveTextContent('Notification tap routing')
+    expect(notificationSettings).toHaveTextContent('Provider delivery')
+
+    await userEvent.click(within(notificationSettings).getByRole('button', { name: 'Grant' }))
+
+    expect(requestPermission).toHaveBeenCalled()
+    expect(notificationSettings).toHaveTextContent('Granted')
+  })
+
+  it('routes Electron deep-link handoffs through the wrapped web router', async () => {
+    let routeHandler: ((route: { routePath: string; target: { kind: string } }) => void) | null =
+      null
+    vi.stubGlobal('openCordDesktop', {
+      deepLinks: {
+        onRoute(handler: (route: { routePath: string; target: { kind: string } }) => void) {
+          routeHandler = handler
+          return () => {
+            routeHandler = null
+          }
+        },
+      },
+      platform: 'darwin',
+    })
+    const router = createAppRouter({
+      history: createMemoryHistory({
+        initialEntries: ['/'],
+      }),
+    })
+
+    render(<App router={router} />)
+
+    await screen.findByRole('heading', { name: '# general' })
+
+    act(() => {
+      routeHandler?.({
+        routePath: '/settings?panel=notifications',
+        target: { kind: 'settings' },
+      })
+    })
+
+    expect(
+      await screen.findByRole('region', {
+        name: 'Notification settings',
+      }),
+    ).toBeInTheDocument()
+  })
+
   it('bootstraps a local alpha workspace and sends messages through real API calls', async () => {
     const channelId = '01973f83-f22a-73ba-ae76-5a045c52fc93'
     fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {

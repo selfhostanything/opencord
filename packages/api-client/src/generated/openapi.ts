@@ -1461,6 +1461,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Rotate a persistent device session refresh token */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["RefreshSessionRequest"];
+                };
+            };
+            responses: {
+                /** @description Refreshed user and rotated session tokens */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AuthResponse"];
+                    };
+                };
+                /** @description Invalid or revoked refresh token */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/oidc/providers": {
         parameters: {
             query?: never;
@@ -5859,6 +5906,9 @@ export interface components {
             email: string;
             password: string;
         };
+        RefreshSessionRequest: {
+            refresh_token: string;
+        };
         User: {
             /** Format: uuid */
             id: string;
@@ -5868,6 +5918,7 @@ export interface components {
         };
         Session: {
             token: string;
+            refresh_token: string;
         };
         AuthResponse: {
             user: components["schemas"]["User"];

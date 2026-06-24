@@ -12,6 +12,7 @@ const requiredOpenApiPaths = [
   '/healthz',
   '/.well-known/opencord',
   '/auth/login',
+  '/auth/refresh',
   '/push-tokens',
   '/voice/channels/{channel_id}/join',
   '/join/{join_slug}',
@@ -31,6 +32,7 @@ describe('OpenCord API client', () => {
   it('keeps generated OpenAPI path types at the package boundary', () => {
     expect(requiredOpenApiPaths).toContain('/healthz')
     expect(requiredOpenApiPaths).toContain('/auth/login')
+    expect(requiredOpenApiPaths).toContain('/auth/refresh')
     expect(requiredOpenApiPaths).toContain('/channels/{channel_id}/webhooks')
   })
 
@@ -146,7 +148,7 @@ describe('OpenCord API client', () => {
               email: 'alpha@example.com',
               display_name: 'Alpha User',
             },
-            session: { token: 'session-token' },
+            session: { token: 'session-token', refresh_token: 'refresh-token' },
           },
           { status: 201 },
         ),
@@ -252,6 +254,7 @@ describe('OpenCord API client', () => {
       displayName: 'Alpha User',
       password: 'correct horse battery staple',
     })
+    expect(registered.session.refreshToken).toBe('refresh-token')
     const client = createOpenCordApiClient({
       baseUrl: 'https://chat.example.com',
       fetch: fetchMock,
@@ -346,6 +349,7 @@ describe('OpenCord API client', () => {
           },
           session: {
             token: 'session-token',
+            refresh_token: 'oidc-refresh-token',
           },
         }),
       )
@@ -392,6 +396,7 @@ describe('OpenCord API client', () => {
       },
       session: {
         token: 'session-token',
+        refreshToken: 'oidc-refresh-token',
       },
     })
     expect(fetchMock).toHaveBeenNthCalledWith(2, 'https://chat.example.com/auth/oidc/callback', {
@@ -402,6 +407,48 @@ describe('OpenCord API client', () => {
         display_name: 'Member User',
         email_verified: true,
         signature: 'signed-provider-assertion',
+      }),
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      method: 'POST',
+    })
+  })
+
+  it('refreshes persistent device sessions with a rotated refresh token', async () => {
+    const fetchMock = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>().mockResolvedValue(
+      jsonResponse({
+        user: {
+          id: '01973f83-f22a-73ba-ae76-5a045c52fc90',
+          email: 'alpha@example.com',
+          display_name: 'Alpha User',
+        },
+        session: {
+          token: 'rotated-session-token',
+          refresh_token: 'rotated-refresh-token',
+        },
+      }),
+    )
+    const client = createOpenCordApiClient({
+      baseUrl: 'https://chat.example.com',
+      fetch: fetchMock,
+    })
+
+    await expect(client.refreshSession({ refreshToken: 'current-refresh-token' })).resolves.toEqual({
+      user: {
+        id: '01973f83-f22a-73ba-ae76-5a045c52fc90',
+        email: 'alpha@example.com',
+        displayName: 'Alpha User',
+      },
+      session: {
+        token: 'rotated-session-token',
+        refreshToken: 'rotated-refresh-token',
+      },
+    })
+    expect(fetchMock).toHaveBeenCalledWith('https://chat.example.com/auth/refresh', {
+      body: JSON.stringify({
+        refresh_token: 'current-refresh-token',
       }),
       headers: {
         Accept: 'application/json',

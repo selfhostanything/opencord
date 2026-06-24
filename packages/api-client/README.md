@@ -13,6 +13,7 @@ Typed REST client boundary shared by web, desktop, and mobile clients.
 - `ServerDiscovery`
 - `AuthResult`
 - `AuthUser`
+- `RefreshSessionRequest`
 - `OidcProvider`
 - `CompleteOidcLoginRequest`
 - `RegisterPushTokenRequest`
@@ -36,7 +37,7 @@ Typed REST client boundary shared by web, desktop, and mobile clients.
 
 The v1 hand-written SDK covers server health, well-known discovery,
 `/api/version`, `/api/capabilities`, `GET /auth/oidc/providers`,
-`POST /auth/oidc/callback`, `POST /push-tokens`, `GET /push-tokens`,
+`POST /auth/oidc/callback`, `POST /auth/refresh`, `POST /push-tokens`, `GET /push-tokens`,
 `POST /voice/channels/{channel_id}/join`, `GET /join/{join_slug}`, bot
 application management, and incoming webhook management.
 Generated OpenAPI types live behind this package boundary without changing app
@@ -46,6 +47,13 @@ Authenticated calls accept a bearer session token through:
 
 ```ts
 createOpenCordApiClient({ sessionToken: '...' })
+```
+
+Persistent device sessions use server-issued refresh tokens. Store refresh
+tokens only in the platform secure store, then rotate them through:
+
+```ts
+const refreshed = await client.refreshSession({ refreshToken })
 ```
 
 OIDC login discovery is shared by web, desktop, and mobile clients:

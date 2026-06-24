@@ -47,6 +47,7 @@ export type AuthUser = {
 
 export type AuthSession = {
   token: string
+  refreshToken: string
 }
 
 export type AuthResult = {
@@ -63,6 +64,10 @@ export type RegisterRequest = {
 export type LoginRequest = {
   email: string
   password: string
+}
+
+export type RefreshSessionRequest = {
+  refreshToken: string
 }
 
 export type CreateOrganizationRequest = {
@@ -447,6 +452,7 @@ type AuthUserPayload = {
 
 type AuthSessionPayload = {
   token?: unknown
+  refresh_token?: unknown
 }
 
 type AuthResultPayload = {
@@ -892,6 +898,17 @@ export class OpenCordApiClient {
       body: JSON.stringify({
         email: request.email,
         password: request.password,
+      }),
+      method: 'POST',
+    })
+
+    return authResultFromPayload(payload)
+  }
+
+  async refreshSession(request: RefreshSessionRequest): Promise<AuthResult> {
+    const payload = await this.requestJson<AuthResultPayload>('/auth/refresh', {
+      body: JSON.stringify({
+        refresh_token: request.refreshToken,
       }),
       method: 'POST',
     })
@@ -1708,6 +1725,7 @@ function authSessionFromPayload(value: unknown): AuthSession {
 
   return {
     token: stringValue(payload.token, ''),
+    refreshToken: stringValue(payload.refresh_token, ''),
   }
 }
 

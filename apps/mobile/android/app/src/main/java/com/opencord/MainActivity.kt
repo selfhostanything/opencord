@@ -44,6 +44,10 @@ class MainActivity : ReactActivity() {
       "autoJoinVoice",
       intent.getBooleanExtra("OPENCORD_E2E_AUTO_JOIN_VOICE", false),
     )
+    config.putBoolean(
+      "demoWorkspace",
+      intent.getBooleanExtra("OPENCORD_E2E_DEMO_WORKSPACE", false),
+    )
     putStringExtra(config, "serverUrl", "OPENCORD_E2E_SERVER_URL")
     putStringExtra(config, "email", "OPENCORD_E2E_EMAIL")
     putStringExtra(config, "password", "OPENCORD_E2E_PASSWORD")

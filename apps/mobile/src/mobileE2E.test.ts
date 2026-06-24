@@ -21,6 +21,29 @@ describe('mobile e2e launch config', () => {
     ).toBeNull()
   })
 
+  it('allows seeded workspace launch props for navigation smoke without a backend login', () => {
+    expect(
+      normalizeMobileE2ELaunchConfig({
+        demoWorkspace: true,
+        enabled: true,
+        email: ' owner@opencord.local ',
+        serverUrl: ' http://localhost:8080 ',
+      }),
+    ).toEqual({
+      autoJoinMeeting: false,
+      autoJoinVoice: false,
+      commandUrl: null,
+      demoWorkspace: true,
+      email: 'owner@opencord.local',
+      meetingId: null,
+      meetingTitle: null,
+      password: '',
+      preferredVoiceChannelName: null,
+      runId: null,
+      serverUrl: 'http://localhost:8080',
+    })
+  })
+
   it('normalizes simulator launch props for repeatable media automation', () => {
     expect(
       normalizeMobileE2ELaunchConfig({
@@ -39,6 +62,7 @@ describe('mobile e2e launch config', () => {
       autoJoinMeeting: true,
       autoJoinVoice: true,
       commandUrl: 'http://127.0.0.1:19007/command',
+      demoWorkspace: false,
       email: 'owner@opencord.local',
       meetingId: '019ef679-3187-7331-a2bd-aa8b5ade1e57',
       meetingTitle: 'OpenCord Local Alpha Standup',
@@ -64,6 +88,7 @@ describe('mobile e2e launch config', () => {
           autoJoinMeeting: false,
           autoJoinVoice: true,
           commandUrl: null,
+          demoWorkspace: false,
           email: 'owner@opencord.local',
           meetingId: null,
           meetingTitle: null,

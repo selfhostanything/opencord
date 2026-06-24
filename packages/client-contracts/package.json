@@ -1,6 +1,6 @@
 {
   "type": "module",
-  "name": "@opencord/media",
+  "name": "@opencord/client-contracts",
   "version": "0.0.0",
   "private": true,
   "license": "Apache-2.0",
@@ -18,11 +18,7 @@
     }
   },
   "devDependencies": {
-    "jsdom": "^29.1.1",
     "typescript": "~6.0.3",
     "vitest": "^4.1.9"
-  },
-  "dependencies": {
-    "livekit-client": "2.19.2"
   }
 }

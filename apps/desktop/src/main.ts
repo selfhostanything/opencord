@@ -8,6 +8,12 @@ import {
   type DesktopMediaAutomationConfig,
 } from './config'
 import {
+  DEEP_LINK_ROUTE_CHANNEL,
+  firstDesktopDeepLinkArg,
+  parseDesktopDeepLinkRoute,
+  type DesktopDeepLinkRoute,
+} from './deepLinks'
+import {
   MESSAGE_NOTIFICATION_CHANNEL,
   buildMessageNotification,
   isMessageNotificationPayload,
@@ -21,8 +27,10 @@ const smokeMode = process.argv.includes('--smoke')
 const mediaAutomationConfig = desktopMediaAutomationConfig()
 
 let mainWindow: BrowserWindow | null = null
+let pendingDeepLinkRoute: DesktopDeepLinkRoute | null = null
 
 applyDesktopMediaAutomationCommandLine(mediaAutomationConfig)
+captureDesktopDeepLink(firstDesktopDeepLinkArg(process.argv))
 
 ipcMain.handle(MESSAGE_NOTIFICATION_CHANNEL, (_event, payload: unknown) => {
   if (!isMessageNotificationPayload(payload) || !Notification.isSupported()) {
@@ -57,6 +65,7 @@ async function createWindow() {
     }
   })
   window.webContents.once('did-finish-load', () => {
+    flushPendingDeepLinkRoute(window)
     if (smokeMode) {
       console.log('opencord-desktop-ready')
       app.quit()
@@ -88,16 +97,43 @@ function isRendererNavigationAllowed(url: string) {
   return url.startsWith('file://')
 }
 
-app.whenReady().then(async () => {
-  configureDesktopMediaAutomation(mediaAutomationConfig)
-  await createWindow()
+const singleInstanceLock = app.requestSingleInstanceLock()
 
-  app.on('activate', () => {
-    if (mainWindow === null || mainWindow.isDestroyed()) {
-      void createWindow()
+if (!singleInstanceLock) {
+  app.quit()
+} else {
+  app.on('second-instance', (_event, argv) => {
+    captureDesktopDeepLink(firstDesktopDeepLinkArg(argv))
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) {
+        mainWindow.restore()
+      }
+      mainWindow.show()
+      mainWindow.focus()
+      flushPendingDeepLinkRoute(mainWindow)
     }
   })
-})
+
+  app.on('open-url', (event, url) => {
+    event.preventDefault()
+    captureDesktopDeepLink(url)
+    if (mainWindow) {
+      flushPendingDeepLinkRoute(mainWindow)
+    }
+  })
+
+  app.whenReady().then(async () => {
+    app.setAsDefaultProtocolClient('opencord')
+    configureDesktopMediaAutomation(mediaAutomationConfig)
+    await createWindow()
+
+    app.on('activate', () => {
+      if (mainWindow === null || mainWindow.isDestroyed()) {
+        void createWindow()
+      }
+    })
+  })
+}
 
 app.on('window-all-closed', () => {
   mainWindow = null
@@ -158,4 +194,27 @@ async function selectDesktopCaptureSource(config: DesktopMediaAutomationConfig) 
   }
 
   return sources.find((source) => source.id.startsWith('screen:')) ?? sources[0] ?? null
+}
+
+function captureDesktopDeepLink(value: string | null) {
+  if (!value) {
+    return false
+  }
+
+  const route = parseDesktopDeepLinkRoute(value)
+  if (!route) {
+    return false
+  }
+
+  pendingDeepLinkRoute = route
+  return true
+}
+
+function flushPendingDeepLinkRoute(window: BrowserWindow) {
+  if (!pendingDeepLinkRoute) {
+    return
+  }
+
+  window.webContents.send(DEEP_LINK_ROUTE_CHANNEL, pendingDeepLinkRoute)
+  pendingDeepLinkRoute = null
 }

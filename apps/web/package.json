@@ -26,6 +26,7 @@
   },
   "dependencies": {
     "@opencord/api-client": "workspace:*",
+    "@opencord/client-contracts": "workspace:*",
     "@opencord/media": "workspace:*",
     "@opencord/realtime": "workspace:*",
     "@opencord/server-connections": "workspace:*",

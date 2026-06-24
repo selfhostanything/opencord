@@ -11,6 +11,8 @@ import {
   mobileChannelsFromApiChannels,
   mobileMediaPermissionRows,
   mobileReducer,
+  mobileRouteTargetForChannel,
+  mobileWorkspaceNavigatorSections,
   mobilePushTokenRequest,
   mobileVoiceParticipantsForChannel,
 } from './mobileState'
@@ -96,6 +98,81 @@ describe('mobile app state', () => {
 
     expect(state.screen).toBe('chat')
     expect(state.selectedChannelId).toBe('backend')
+  })
+
+  it('builds Discord-like mobile workspace navigation sections', () => {
+    const state = createInitialMobileState()
+    const sections = mobileWorkspaceNavigatorSections(state)
+
+    expect(sections).toEqual([
+      {
+        id: 'main-text-channels',
+        title: 'OpenCord HQ / Text channels',
+        spaceId: 'main',
+        channels: [
+          expect.objectContaining({
+            id: 'general',
+            kind: 'text',
+            mentionCount: 2,
+            selected: true,
+            unread: true,
+            voiceOccupancy: 0,
+          }),
+          expect.objectContaining({
+            id: 'backend',
+            kind: 'text',
+            mentionCount: 0,
+            selected: false,
+            unread: false,
+            voiceOccupancy: 0,
+          }),
+          expect.objectContaining({
+            id: 'announcements',
+            kind: 'text',
+            mentionCount: 0,
+            selected: false,
+            unread: false,
+            voiceOccupancy: 0,
+          }),
+        ],
+      },
+      {
+        id: 'main-voice-channels',
+        title: 'OpenCord HQ / Voice channels',
+        spaceId: 'main',
+        channels: [
+          expect.objectContaining({
+            id: 'standup',
+            kind: 'voice',
+            mentionCount: 0,
+            selected: false,
+            unread: false,
+            voiceOccupancy: 1,
+          }),
+          expect.objectContaining({
+            id: 'office-hours',
+            kind: 'voice',
+            mentionCount: 0,
+            selected: false,
+            unread: false,
+            voiceOccupancy: 1,
+          }),
+        ],
+      },
+    ])
+  })
+
+  it('creates shared route targets for mobile channel navigation', () => {
+    const state = createInitialMobileState()
+
+    expect(mobileRouteTargetForChannel(state, 'backend')).toEqual({
+      kind: 'channel',
+      serverId: 'local-opencord',
+      organizationId: 'local',
+      spaceId: 'main',
+      channelId: 'backend',
+    })
+    expect(mobileRouteTargetForChannel(state, 'missing')).toBeNull()
   })
 
   it('adds local messages to the selected channel', () => {

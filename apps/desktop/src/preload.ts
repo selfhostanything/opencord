@@ -1,5 +1,11 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
+import {
+  DEEP_LINK_ROUTE_CHANNEL,
+  isDesktopDeepLinkRoute,
+  type DesktopDeepLinkRoute,
+} from './deepLinks'
+
 type MessageNotificationPayload = {
   channelName: string
   authorName: string
@@ -23,6 +29,24 @@ contextBridge.exposeInMainWorld('openCordDesktop', {
       }
 
       return ipcRenderer.invoke(MESSAGE_NOTIFICATION_CHANNEL, payload) as Promise<boolean>
+    },
+  },
+  deepLinks: {
+    onRoute(handler: (route: DesktopDeepLinkRoute) => void) {
+      if (typeof handler !== 'function') {
+        return () => undefined
+      }
+
+      const listener = (_event: Electron.IpcRendererEvent, payload: unknown) => {
+        if (isDesktopDeepLinkRoute(payload)) {
+          handler(payload)
+        }
+      }
+
+      ipcRenderer.on(DEEP_LINK_ROUTE_CHANNEL, listener)
+      return () => {
+        ipcRenderer.removeListener(DEEP_LINK_ROUTE_CHANNEL, listener)
+      }
     },
   },
 })

@@ -4,6 +4,7 @@ export type MobileE2ELaunchConfig = {
   autoJoinMeeting: boolean
   autoJoinVoice: boolean
   commandUrl: string | null
+  demoWorkspace: boolean
   email: string
   meetingId: string | null
   meetingTitle: string | null
@@ -28,7 +29,8 @@ export function normalizeMobileE2ELaunchConfig(value: unknown): MobileE2ELaunchC
   const serverUrl = trimmedString(candidate.serverUrl)
   const email = trimmedString(candidate.email)
   const password = typeof candidate.password === 'string' ? candidate.password : ''
-  if (!serverUrl || !email || !password) {
+  const demoWorkspace = candidate.demoWorkspace === true
+  if (!serverUrl || !email || (!password && !demoWorkspace)) {
     return null
   }
 
@@ -36,6 +38,7 @@ export function normalizeMobileE2ELaunchConfig(value: unknown): MobileE2ELaunchC
     autoJoinMeeting: candidate.autoJoinMeeting === true,
     autoJoinVoice: candidate.autoJoinVoice === true,
     commandUrl: trimmedString(candidate.commandUrl),
+    demoWorkspace,
     email,
     meetingId: trimmedString(candidate.meetingId),
     meetingTitle: trimmedString(candidate.meetingTitle),

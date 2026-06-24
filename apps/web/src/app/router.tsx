@@ -5,6 +5,10 @@ import {
   Outlet,
   type RouterHistory,
 } from '@tanstack/react-router'
+import {
+  buildOpenCordRoutePath,
+  type OpenCordRouteTarget,
+} from '@opencord/client-contracts'
 
 import { WorkspaceShell } from '../features/workspace/WorkspaceShell'
 import { useWorkspaceUiStore } from '../features/workspace/state/workspaceUiStore'
@@ -84,6 +88,10 @@ export function createAppRouter(options: { history?: RouterHistory } = {}) {
 export const router = createAppRouter()
 
 export type AppRouter = typeof router
+
+export function workspaceRoutePathForTarget(target: OpenCordRouteTarget) {
+  return buildOpenCordRoutePath(target)
+}
 
 declare module '@tanstack/react-router' {
   interface Register {

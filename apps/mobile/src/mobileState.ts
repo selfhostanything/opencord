@@ -5,6 +5,7 @@ import {
   type PushToken,
   type RegisterPushTokenRequest,
 } from '@opencord/api-client'
+import type { OpenCordRouteTarget } from '@opencord/client-contracts'
 import {
   INITIAL_REALTIME_STATUS,
   type RealtimeConnectionStatus,
@@ -16,6 +17,7 @@ import {
   removeServerConnection,
   switchServerConnection,
   upsertServerConnection,
+  type ServerConnection,
   type ServerConnectionState,
 } from '@opencord/server-connections'
 
@@ -25,6 +27,9 @@ export type MobileScreen = 'login' | 'channels' | 'chat'
 
 export const DEFAULT_MOBILE_OPENCORD_SERVER_URL = 'http://10.0.2.2:8080'
 export const IOS_SIMULATOR_MOBILE_OPENCORD_SERVER_URL = 'http://localhost:8080'
+export const DEFAULT_MOBILE_ORGANIZATION_ID = 'local'
+export const DEFAULT_MOBILE_SPACE_ID = 'main'
+export const DEFAULT_MOBILE_SPACE_NAME = 'OpenCord HQ'
 
 export function mobileDefaultOpenCordServerUrlForPlatform(platform: string) {
   return platform === 'ios'
@@ -43,6 +48,31 @@ export type MobileChannel = {
   name: string
   topic: string
   unread: boolean
+  category?: string
+  mentionCount?: number
+  organizationId?: string
+  spaceId?: string
+  spaceName?: string
+  voiceOccupancy?: number
+}
+
+export type MobileWorkspaceChannelRow = {
+  id: string
+  kind: 'text' | 'voice'
+  name: string
+  topic: string
+  connected: boolean
+  mentionCount: number
+  selected: boolean
+  unread: boolean
+  voiceOccupancy: number
+}
+
+export type MobileWorkspaceNavigatorSection = {
+  id: string
+  title: string
+  spaceId: string
+  channels: MobileWorkspaceChannelRow[]
 }
 
 export type MobileMessage = {
@@ -224,6 +254,11 @@ const initialChannels: MobileChannel[] = [
     name: 'general',
     topic: 'Company-wide chat and daily updates.',
     unread: true,
+    category: 'Text channels',
+    mentionCount: 2,
+    organizationId: DEFAULT_MOBILE_ORGANIZATION_ID,
+    spaceId: DEFAULT_MOBILE_SPACE_ID,
+    spaceName: DEFAULT_MOBILE_SPACE_NAME,
   },
   {
     id: 'backend',
@@ -231,6 +266,10 @@ const initialChannels: MobileChannel[] = [
     name: 'backend',
     topic: 'API, realtime, permissions, and deployment work.',
     unread: false,
+    category: 'Text channels',
+    organizationId: DEFAULT_MOBILE_ORGANIZATION_ID,
+    spaceId: DEFAULT_MOBILE_SPACE_ID,
+    spaceName: DEFAULT_MOBILE_SPACE_NAME,
   },
   {
     id: 'announcements',
@@ -238,6 +277,10 @@ const initialChannels: MobileChannel[] = [
     name: 'announcements',
     topic: 'Read-only release notes and notices.',
     unread: false,
+    category: 'Text channels',
+    organizationId: DEFAULT_MOBILE_ORGANIZATION_ID,
+    spaceId: DEFAULT_MOBILE_SPACE_ID,
+    spaceName: DEFAULT_MOBILE_SPACE_NAME,
   },
   {
     id: 'standup',
@@ -245,6 +288,10 @@ const initialChannels: MobileChannel[] = [
     name: 'standup',
     topic: 'Daily mobile voice check-in.',
     unread: false,
+    category: 'Voice channels',
+    organizationId: DEFAULT_MOBILE_ORGANIZATION_ID,
+    spaceId: DEFAULT_MOBILE_SPACE_ID,
+    spaceName: DEFAULT_MOBILE_SPACE_NAME,
   },
   {
     id: 'office-hours',
@@ -252,6 +299,10 @@ const initialChannels: MobileChannel[] = [
     name: 'office-hours',
     topic: 'Drop-in support voice room.',
     unread: false,
+    category: 'Voice channels',
+    organizationId: DEFAULT_MOBILE_ORGANIZATION_ID,
+    spaceId: DEFAULT_MOBILE_SPACE_ID,
+    spaceName: DEFAULT_MOBILE_SPACE_NAME,
   },
 ]
 
@@ -807,6 +858,61 @@ export function mobileCanJoinVoice(state: MobileAppState) {
   return state.mediaPermissions.microphone === 'granted'
 }
 
+export function mobileWorkspaceNavigatorSections(
+  state: MobileAppState,
+): MobileWorkspaceNavigatorSection[] {
+  const sections = new Map<string, MobileWorkspaceNavigatorSection>()
+
+  for (const channel of state.channels) {
+    const spaceId = channel.spaceId ?? DEFAULT_MOBILE_SPACE_ID
+    const spaceName = channel.spaceName ?? DEFAULT_MOBILE_SPACE_NAME
+    const category = channel.category ?? (channel.kind === 'voice' ? 'Voice channels' : 'Text channels')
+    const sectionId = `${spaceId}-${slugValue(category)}`
+    const section = sections.get(sectionId) ?? {
+      id: sectionId,
+      title: `${spaceName} / ${category}`,
+      spaceId,
+      channels: [],
+    }
+
+    section.channels.push({
+      id: channel.id,
+      kind: channel.kind,
+      name: channel.name,
+      topic: channel.topic,
+      connected: state.voice.connectedChannelId === channel.id,
+      mentionCount: channel.mentionCount ?? 0,
+      selected: state.selectedChannelId === channel.id,
+      unread: channel.unread,
+      voiceOccupancy:
+        channel.kind === 'voice'
+          ? mobileVoiceParticipantsForChannel(state, channel.id).length || (channel.voiceOccupancy ?? 0)
+          : 0,
+    })
+    sections.set(sectionId, section)
+  }
+
+  return Array.from(sections.values())
+}
+
+export function mobileRouteTargetForChannel(
+  state: MobileAppState,
+  channelId = state.selectedChannelId,
+): OpenCordRouteTarget | null {
+  const channel = state.channels.find((candidate) => candidate.id === channelId)
+  if (!channel) {
+    return null
+  }
+
+  return {
+    kind: 'channel',
+    serverId: mobileServerRouteId(activeMobileServerConnection(state)),
+    organizationId: channel.organizationId ?? DEFAULT_MOBILE_ORGANIZATION_ID,
+    spaceId: channel.spaceId ?? DEFAULT_MOBILE_SPACE_ID,
+    channelId: channel.id,
+  }
+}
+
 export function mobileChannelsFromApiChannels(channels: Channel[]): MobileChannel[] {
   return channels.map((channel) => ({
     id: channel.id,
@@ -827,6 +933,14 @@ export function activeMobileServerConnection(state: MobileAppState) {
   return activeServerConnection(state.serverConnections)
 }
 
+function mobileServerRouteId(connection: ServerConnection | null) {
+  if (!connection) {
+    return 'local-opencord'
+  }
+
+  return slugValue(connection.displayName) || connection.id
+}
+
 function createDefaultMobileServerConnectionState(defaultServerUrl = DEFAULT_MOBILE_OPENCORD_SERVER_URL) {
   return createDefaultServerConnectionState({
     baseUrl: defaultServerUrl,
@@ -836,6 +950,14 @@ function createDefaultMobileServerConnectionState(defaultServerUrl = DEFAULT_MOB
 
 function displayNameForEmail(email: string) {
   return email.split('@')[0] || 'OpenCord user'
+}
+
+function slugValue(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
 }
 
 function updateMobileSelfVoiceStatus(

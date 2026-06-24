@@ -24,6 +24,7 @@ import {
   createOpenCordRealtimeClient,
   type RealtimeIncomingEnvelope,
 } from '@opencord/realtime'
+import type { ServerConnection } from '@opencord/server-connections'
 
 import {
   activeMobileServerConnection,
@@ -33,6 +34,8 @@ import {
   mobileCanListenToVoice,
   mobileCanSpeakInVoice,
   mobileMediaPermissionRows,
+  mobileRouteTargetForChannel,
+  mobileWorkspaceNavigatorSections,
   messagesForChannel,
   mobileReducer,
   mobileVoiceParticipantsForChannel,
@@ -42,8 +45,13 @@ import {
   type MobileMediaPermissionRow,
   type MobileMessage,
   type MobileRichEmbed,
+  type MobileWorkspaceChannelRow,
   type MobileVoiceParticipant,
 } from './src/mobileState'
+import {
+  useMobileSessionStore,
+  useMobileSettingsStore,
+} from './src/mobileStores'
 import {
   mobileE2ECommandFromUrl,
   mobileE2EStateUrl,
@@ -101,6 +109,9 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
   const lastE2ECommandIdRef = useRef<string | null>(null)
   const voiceSessionRef = useRef<NativeLiveKitVoiceSession | null>(null)
   const stateRef = useRef(state)
+  const setMobileAccountMetadata = useMobileSessionStore((store) => store.setAccountMetadata)
+  const setMobileRouteTarget = useMobileSessionStore((store) => store.setRouteTarget)
+  const openMobileSettingsPanel = useMobileSettingsStore((store) => store.openPanel)
   const [serverUrl, setServerUrl] = useState(state.serverUrl)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -108,10 +119,12 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
   const [loginStatus, setLoginStatus] = useState<'idle' | 'loading'>('idle')
   const [composerText, setComposerText] = useState('')
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [serverManagerOpen, setServerManagerOpen] = useState(false)
   const activeChannel = selectedChannel(state)
   const activeServer = activeMobileServerConnection(state)
   const visibleMessages = useMemo(() => messagesForChannel(state), [state])
   const permissionRows = useMemo(() => mobileMediaPermissionRows(state), [state])
+  const workspaceSections = useMemo(() => mobileWorkspaceNavigatorSections(state), [state])
   const activeVoiceChannel = state.channels.find(
     (channel) => channel.id === state.voice.connectedChannelId,
   )
@@ -140,6 +153,17 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
   useEffect(() => {
     stateRef.current = state
   }, [state])
+
+  useEffect(() => {
+    setMobileAccountMetadata(state.account)
+  }, [setMobileAccountMetadata, state.account])
+
+  useEffect(() => {
+    const routeTarget = mobileRouteTargetForChannel(state)
+    if (routeTarget) {
+      setMobileRouteTarget(routeTarget)
+    }
+  }, [setMobileRouteTarget, state])
 
   useEffect(() => {
     if (!state.sessionToken) {
@@ -186,6 +210,15 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
     setServerUrl(e2eLaunchConfig.serverUrl)
     setEmail(e2eLaunchConfig.email)
     setPassword(e2eLaunchConfig.password)
+    if (e2eLaunchConfig.demoWorkspace) {
+      dispatch({
+        type: 'login.submit',
+        serverUrl: e2eLaunchConfig.serverUrl,
+        email: e2eLaunchConfig.email,
+      })
+      return
+    }
+
     void submitLogin(e2eLaunchConfig)
   }, [e2eLaunchConfig])
 
@@ -419,6 +452,36 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
 
   function switchServer(connectionId: string) {
     dispatch({ type: 'server.switch', connectionId })
+    setServerManagerOpen(false)
+  }
+
+  function addServerConnection() {
+    const baseUrl = serverUrl.trim()
+    if (!baseUrl) {
+      return
+    }
+
+    dispatch({ type: 'server.add', baseUrl })
+    setServerManagerOpen(false)
+  }
+
+  function openMobileChannel(channel: Pick<MobileChannel, 'id' | 'kind'>) {
+    const routeTarget = mobileRouteTargetForChannel(state, channel.id)
+    if (routeTarget) {
+      setMobileRouteTarget(routeTarget)
+    }
+
+    if (channel.kind === 'voice') {
+      void joinMobileVoice(channel.id)
+      return
+    }
+
+    dispatch({ type: 'channel.select', channelId: channel.id })
+  }
+
+  function toggleVoiceSettings() {
+    openMobileSettingsPanel('voice-video')
+    setSettingsOpen((current) => !current)
   }
 
   function sendMessage() {
@@ -719,68 +782,74 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
     return (
       <View style={shellStyle}>
         <StatusBar backgroundColor="#151515" barStyle="light-content" />
-        <View style={styles.header}>
-          <View>
-            <Text style={styles.title}>Channels</Text>
-            <Text style={styles.subtle}>{activeServer?.displayName ?? state.serverUrl}</Text>
-          </View>
-          <View style={styles.headerActions}>
-            <Text style={styles.status}>{state.realtimeStatus}</Text>
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => setSettingsOpen((current) => !current)}
-              style={styles.settingsButton}
-            >
-              <Text style={styles.primaryButtonText}>Voice & Video</Text>
-            </Pressable>
+        <View style={styles.mobileWorkspace}>
+          <ServerRail
+            activeConnectionId={state.serverConnections.activeConnectionId}
+            connections={state.serverConnections.connections}
+            onOpenManager={() => setServerManagerOpen((current) => !current)}
+            onSwitchServer={switchServer}
+          />
+          <View style={styles.channelDrawer}>
+            <View style={styles.drawerHeader}>
+              <View style={styles.drawerTitleBlock}>
+                <Text style={styles.title}>Channels</Text>
+                <Text numberOfLines={1} style={styles.subtle}>
+                  {activeServer?.displayName ?? state.serverUrl}
+                </Text>
+              </View>
+              <View style={styles.drawerHeaderActions}>
+                <Text style={styles.status}>{state.realtimeStatus}</Text>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={toggleVoiceSettings}
+                  style={styles.iconButton}
+                >
+                  <Text style={styles.iconButtonText}>Voice</Text>
+                </Pressable>
+              </View>
+            </View>
+            {serverManagerOpen ? (
+              <ServerManagementSheet
+                activeConnectionId={state.serverConnections.activeConnectionId}
+                onAddServer={addServerConnection}
+                onClose={() => setServerManagerOpen(false)}
+                onRemoveServer={(connectionId) => dispatch({ type: 'server.remove', connectionId })}
+                onServerUrlChange={setServerUrl}
+                serverUrl={serverUrl}
+              />
+            ) : null}
+            {settingsOpen ? (
+              <PermissionSettingsPanel
+                maxHeight={permissionPanelMaxHeight}
+                onOpenSettings={openNativePermissionSettings}
+                onRequest={requestPermission}
+                rows={permissionRows}
+              />
+            ) : null}
+            {state.voice.errorMessage ? (
+              <Text style={styles.inlineError}>{state.voice.errorMessage}</Text>
+            ) : null}
+            <WorkspaceNavigator
+              onChannelPress={openMobileChannel}
+              sections={workspaceSections}
+            />
+            <MobileVoiceTray
+              channelName={activeVoiceRoomName}
+              canListen={mobileCanListenToVoice(state)}
+              canSpeak={mobileCanSpeakInVoice(state)}
+              participants={voiceParticipants}
+              remoteScreenShares={state.voice.media?.remoteScreenShares ?? 0}
+              remoteScreenShareStreams={state.voice.media?.remoteScreenShareStreams ?? []}
+              selfDeaf={state.voice.selfDeaf}
+              selfMute={state.voice.selfMute}
+              status={state.voice.connectionStatus}
+              errorMessage={state.voice.errorMessage}
+              onLeave={leaveVoice}
+              onToggleDeaf={toggleDeaf}
+              onToggleMute={toggleMute}
+            />
           </View>
         </View>
-        {settingsOpen ? (
-          <PermissionSettingsPanel
-            maxHeight={permissionPanelMaxHeight}
-            onOpenSettings={openNativePermissionSettings}
-            onRequest={requestPermission}
-            rows={permissionRows}
-          />
-        ) : null}
-        {state.voice.errorMessage ? (
-          <Text style={styles.inlineError}>{state.voice.errorMessage}</Text>
-        ) : null}
-        <FlatList
-          data={state.channels}
-          keyExtractor={(channel) => channel.id}
-          style={styles.flexList}
-          renderItem={({ item }) => (
-            <ChannelRow
-              channel={item}
-              connected={state.voice.connectedChannelId === item.id}
-              onPress={() => {
-                if (item.kind === 'voice') {
-                  void joinMobileVoice(item.id)
-                  return
-                }
-
-                dispatch({ type: 'channel.select', channelId: item.id })
-              }}
-            />
-          )}
-          contentContainerStyle={styles.listContent}
-        />
-        <MobileVoiceTray
-          channelName={activeVoiceRoomName}
-          canListen={mobileCanListenToVoice(state)}
-          canSpeak={mobileCanSpeakInVoice(state)}
-          participants={voiceParticipants}
-          remoteScreenShares={state.voice.media?.remoteScreenShares ?? 0}
-          remoteScreenShareStreams={state.voice.media?.remoteScreenShareStreams ?? []}
-          selfDeaf={state.voice.selfDeaf}
-          selfMute={state.voice.selfMute}
-          status={state.voice.connectionStatus}
-          errorMessage={state.voice.errorMessage}
-          onLeave={leaveVoice}
-          onToggleDeaf={toggleDeaf}
-          onToggleMute={toggleMute}
-        />
       </View>
     )
   }
@@ -796,7 +865,26 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
           <Text style={styles.title}># {activeChannel.name}</Text>
           <Text style={styles.subtle}>{activeChannel.topic}</Text>
         </View>
+        <View style={styles.channelHeaderActions}>
+          <HeaderActionButton label="Search" onPress={() => undefined} />
+          <HeaderActionButton label="Members" onPress={() => undefined} />
+          <HeaderActionButton
+            label="Settings"
+            onPress={() => {
+              openMobileSettingsPanel('account')
+              setSettingsOpen(true)
+            }}
+          />
+        </View>
       </View>
+      {settingsOpen ? (
+        <PermissionSettingsPanel
+          maxHeight={permissionPanelMaxHeight}
+          onOpenSettings={openNativePermissionSettings}
+          onRequest={requestPermission}
+          rows={permissionRows}
+        />
+      ) : null}
       <FlatList
         data={visibleMessages}
         keyExtractor={(message) => message.id}
@@ -836,25 +924,169 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
   )
 }
 
+function ServerRail({
+  activeConnectionId,
+  connections,
+  onOpenManager,
+  onSwitchServer,
+}: {
+  activeConnectionId: string
+  connections: ServerConnection[]
+  onOpenManager: () => void
+  onSwitchServer: (connectionId: string) => void
+}) {
+  return (
+    <View style={styles.serverRail}>
+      <ScrollView
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.serverRailList}
+      >
+        {connections.map((connection) => (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ selected: connection.id === activeConnectionId }}
+            key={connection.id}
+            onPress={() => onSwitchServer(connection.id)}
+            style={[
+              styles.serverPill,
+              connection.id === activeConnectionId ? styles.activeServerPill : null,
+            ]}
+          >
+            <Text style={styles.serverInitials}>{initialsForLabel(connection.displayName)}</Text>
+          </Pressable>
+        ))}
+      </ScrollView>
+      <Pressable
+        accessibilityLabel="Manage servers"
+        accessibilityRole="button"
+        onPress={onOpenManager}
+        style={styles.addServerPill}
+      >
+        <Text style={styles.addServerText}>+</Text>
+      </Pressable>
+    </View>
+  )
+}
+
+function ServerManagementSheet({
+  activeConnectionId,
+  onAddServer,
+  onClose,
+  onRemoveServer,
+  onServerUrlChange,
+  serverUrl,
+}: {
+  activeConnectionId: string
+  onAddServer: () => void
+  onClose: () => void
+  onRemoveServer: (connectionId: string) => void
+  onServerUrlChange: (value: string) => void
+  serverUrl: string
+}) {
+  return (
+    <View style={styles.serverManagerSheet}>
+      <View style={styles.sheetHeader}>
+        <View>
+          <Text style={styles.sheetTitle}>Server connection</Text>
+          <Text style={styles.subtle}>Add or remove a self-hosted OpenCord server.</Text>
+        </View>
+        <Pressable accessibilityRole="button" onPress={onClose} style={styles.closeSheetButton}>
+          <Text style={styles.headerActionText}>Close</Text>
+        </Pressable>
+      </View>
+      <View style={styles.serverRailControls}>
+        <TextInput
+          accessibilityLabel="Server URL"
+          autoCapitalize="none"
+          onChangeText={onServerUrlChange}
+          placeholder="https://chat.example.com"
+          placeholderTextColor="#7f877d"
+          style={styles.serverRailInput}
+          value={serverUrl}
+        />
+        <Pressable accessibilityRole="button" onPress={onAddServer} style={styles.serverRailButton}>
+          <Text style={styles.primaryButtonText}>Add</Text>
+        </Pressable>
+      </View>
+      <Pressable
+        accessibilityRole="button"
+        onPress={() => onRemoveServer(activeConnectionId)}
+        style={styles.removeCurrentServerButton}
+      >
+        <Text style={styles.primaryButtonText}>Remove current server</Text>
+      </Pressable>
+    </View>
+  )
+}
+
+function WorkspaceNavigator({
+  onChannelPress,
+  sections,
+}: {
+  onChannelPress: (channel: Pick<MobileWorkspaceChannelRow, 'id' | 'kind'>) => void
+  sections: Array<{
+    id: string
+    title: string
+    channels: MobileWorkspaceChannelRow[]
+  }>
+}) {
+  return (
+    <ScrollView contentContainerStyle={styles.navigatorContent} style={styles.flexList}>
+      {sections.map((section) => (
+        <View key={section.id} style={styles.navigatorSection}>
+          <Text style={styles.sectionTitle}>{section.title}</Text>
+          {section.channels.map((channel) => (
+            <ChannelRow
+              channel={channel}
+              key={channel.id}
+              onPress={() => onChannelPress(channel)}
+            />
+          ))}
+        </View>
+      ))}
+    </ScrollView>
+  )
+}
+
+function HeaderActionButton({ label, onPress }: { label: string; onPress: () => void }) {
+  return (
+    <Pressable accessibilityRole="button" onPress={onPress} style={styles.headerActionButton}>
+      <Text style={styles.headerActionText}>{label}</Text>
+    </Pressable>
+  )
+}
+
 function ChannelRow({
   channel,
-  connected,
   onPress,
 }: {
-  channel: MobileChannel
-  connected: boolean
+  channel: MobileWorkspaceChannelRow
   onPress: () => void
 }) {
   return (
-    <Pressable accessibilityRole="button" onPress={onPress} style={styles.channelRow}>
-      <View>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ selected: channel.selected }}
+      onPress={onPress}
+      style={[styles.channelRow, channel.selected ? styles.selectedChannelRow : null]}
+    >
+      <View style={styles.channelRowCopy}>
         <Text style={styles.channelName}>
           {channel.kind === 'voice' ? 'V' : '#'} {channel.name}
         </Text>
         <Text style={styles.subtle}>{channel.topic}</Text>
       </View>
-      {connected ? <Text style={styles.voiceConnectedLabel}>Voice</Text> : null}
-      {channel.unread ? <View style={styles.unreadDot} /> : null}
+      <View style={styles.channelMeta}>
+        {channel.kind === 'voice' && channel.voiceOccupancy > 0 ? (
+          <Text style={styles.voiceOccupancy}>{channel.voiceOccupancy}</Text>
+        ) : null}
+        {channel.connected ? <Text style={styles.voiceConnectedLabel}>Voice</Text> : null}
+        {channel.mentionCount > 0 ? (
+          <Text style={styles.mentionBadge}>{channel.mentionCount}</Text>
+        ) : channel.unread ? (
+          <View style={styles.unreadDot} />
+        ) : null}
+      </View>
     </Pressable>
   )
 }
@@ -1178,6 +1410,15 @@ function errorMessage(error: unknown, fallback: string) {
   return fallback
 }
 
+function initialsForLabel(value: string) {
+  const parts = value
+    .split(/\s+/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+
+  return (parts[0]?.[0] ?? 'O').concat(parts[1]?.[0] ?? '').toUpperCase()
+}
+
 const styles = StyleSheet.create({
   shell: {
     flex: 1,
@@ -1263,7 +1504,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingBottom: 10,
     paddingHorizontal: 16,
-    paddingTop: 4,
+    paddingTop: 0,
   },
   title: {
     color: '#f5f6f3',
@@ -1287,6 +1528,164 @@ const styles = StyleSheet.create({
     minHeight: 34,
     justifyContent: 'center',
     paddingHorizontal: 10,
+  },
+  mobileWorkspace: {
+    flex: 1,
+    flexDirection: 'row',
+  },
+  channelDrawer: {
+    backgroundColor: '#151515',
+    flex: 1,
+  },
+  drawerHeader: {
+    alignItems: 'center',
+    borderBottomColor: '#2b2f2d',
+    borderBottomWidth: 1,
+    flexDirection: 'row',
+    gap: 10,
+    justifyContent: 'space-between',
+    minHeight: 68,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  drawerTitleBlock: {
+    flex: 1,
+    minWidth: 0,
+  },
+  drawerHeaderActions: {
+    alignItems: 'flex-end',
+    gap: 6,
+  },
+  iconButton: {
+    alignItems: 'center',
+    backgroundColor: '#2b2b2b',
+    borderRadius: 8,
+    justifyContent: 'center',
+    minHeight: 32,
+    minWidth: 58,
+    paddingHorizontal: 8,
+  },
+  iconButtonText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  serverRail: {
+    alignItems: 'center',
+    backgroundColor: '#101010',
+    borderRightColor: '#242826',
+    borderRightWidth: 1,
+    gap: 10,
+    paddingHorizontal: 8,
+    paddingTop: 10,
+    width: 72,
+  },
+  serverRailList: {
+    alignItems: 'center',
+    gap: 10,
+  },
+  serverPill: {
+    alignItems: 'center',
+    backgroundColor: '#252525',
+    borderColor: '#252525',
+    borderRadius: 18,
+    borderWidth: 1,
+    height: 48,
+    justifyContent: 'center',
+    width: 48,
+  },
+  activeServerPill: {
+    backgroundColor: '#1d2b28',
+    borderColor: '#28796d',
+    borderRadius: 14,
+  },
+  serverInitials: {
+    color: '#f5f6f3',
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  addServerPill: {
+    alignItems: 'center',
+    backgroundColor: '#1f2d29',
+    borderRadius: 24,
+    height: 48,
+    justifyContent: 'center',
+    width: 48,
+  },
+  addServerText: {
+    color: '#86e0bb',
+    fontSize: 28,
+    fontWeight: '800',
+    lineHeight: 32,
+  },
+  serverPillName: {
+    color: '#d8ddd5',
+    fontSize: 11,
+    fontWeight: '700',
+    maxWidth: 68,
+  },
+  serverManagerSheet: {
+    backgroundColor: '#1d1d1d',
+    borderBottomColor: '#2b2f2d',
+    borderBottomWidth: 1,
+    gap: 10,
+    padding: 12,
+  },
+  sheetHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 10,
+    justifyContent: 'space-between',
+  },
+  sheetTitle: {
+    color: '#f5f6f3',
+    fontSize: 15,
+    fontWeight: '900',
+  },
+  closeSheetButton: {
+    alignItems: 'center',
+    backgroundColor: '#2b2b2b',
+    borderRadius: 8,
+    justifyContent: 'center',
+    minHeight: 32,
+    paddingHorizontal: 10,
+  },
+  serverRailControls: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  serverRailInput: {
+    borderColor: '#333a36',
+    borderRadius: 8,
+    borderWidth: 1,
+    color: '#f5f6f3',
+    flex: 1,
+    minHeight: 40,
+    paddingHorizontal: 10,
+  },
+  serverRailButton: {
+    alignItems: 'center',
+    backgroundColor: '#28796d',
+    borderRadius: 8,
+    justifyContent: 'center',
+    minHeight: 40,
+    minWidth: 58,
+  },
+  serverRailRemoveButton: {
+    alignItems: 'center',
+    backgroundColor: '#353535',
+    borderRadius: 8,
+    justifyContent: 'center',
+    minHeight: 40,
+    minWidth: 74,
+  },
+  removeCurrentServerButton: {
+    alignItems: 'center',
+    backgroundColor: '#353535',
+    borderRadius: 8,
+    justifyContent: 'center',
+    minHeight: 40,
   },
   errorText: {
     color: '#ffb1a8',
@@ -1351,6 +1750,19 @@ const styles = StyleSheet.create({
   flexList: {
     flex: 1,
   },
+  navigatorContent: {
+    gap: 14,
+    padding: 12,
+  },
+  navigatorSection: {
+    gap: 8,
+  },
+  sectionTitle: {
+    color: '#aab2a8',
+    fontSize: 11,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+  },
   listContent: {
     padding: 12,
     gap: 10,
@@ -1364,10 +1776,42 @@ const styles = StyleSheet.create({
     minHeight: 72,
     padding: 14,
   },
+  selectedChannelRow: {
+    backgroundColor: '#26312f',
+    borderColor: '#28796d',
+    borderWidth: 1,
+  },
+  channelRowCopy: {
+    flex: 1,
+    gap: 3,
+    paddingRight: 8,
+  },
   channelName: {
     color: '#f5f6f3',
     fontSize: 16,
     fontWeight: '800',
+  },
+  channelMeta: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  mentionBadge: {
+    backgroundColor: '#c94d4d',
+    borderRadius: 9,
+    color: '#ffffff',
+    fontSize: 11,
+    fontWeight: '900',
+    minWidth: 18,
+    overflow: 'hidden',
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+    textAlign: 'center',
+  },
+  voiceOccupancy: {
+    color: '#d8ddd5',
+    fontSize: 12,
+    fontWeight: '900',
   },
   unreadDot: {
     backgroundColor: '#4b5fc4',
@@ -1444,6 +1888,27 @@ const styles = StyleSheet.create({
   },
   channelTitleBlock: {
     flex: 1,
+  },
+  channelHeaderActions: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    justifyContent: 'flex-end',
+    maxWidth: 168,
+  },
+  headerActionButton: {
+    alignItems: 'center',
+    backgroundColor: '#2b2b2b',
+    borderRadius: 8,
+    justifyContent: 'center',
+    minHeight: 30,
+    paddingHorizontal: 8,
+  },
+  headerActionText: {
+    color: '#ffffff',
+    fontSize: 11,
+    fontWeight: '800',
   },
   timeline: {
     padding: 12,

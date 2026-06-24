@@ -37,6 +37,9 @@ importers:
       '@opencord/api-client':
         specifier: workspace:*
         version: link:../../packages/api-client
+      '@opencord/client-contracts':
+        specifier: workspace:*
+        version: link:../../packages/client-contracts
       '@opencord/realtime':
         specifier: workspace:*
         version: link:../../packages/realtime
@@ -55,6 +58,9 @@ importers:
       react-native-safe-area-context:
         specifier: 5.8.0
         version: 5.8.0(react-native@0.86.0(@babel/core@7.29.7(supports-color@10.2.2))(@react-native-community/cli@20.1.3(supports-color@10.2.2)(typescript@6.0.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7(supports-color@10.2.2))(supports-color@10.2.2))(@types/react@19.2.17)(react@19.2.7)(supports-color@10.2.2))(react@19.2.7)
+      zustand:
+        specifier: ^5.0.14
+        version: 5.0.14(@types/react@19.2.17)(react@19.2.7)(use-sync-external-store@1.6.0(react@19.2.7))
     devDependencies:
       '@babel/core':
         specifier: ^7.29.7
@@ -98,6 +104,9 @@ importers:
       '@opencord/api-client':
         specifier: workspace:*
         version: link:../../packages/api-client
+      '@opencord/client-contracts':
+        specifier: workspace:*
+        version: link:../../packages/client-contracts
       '@opencord/media':
         specifier: workspace:*
         version: link:../../packages/media
@@ -169,12 +178,24 @@ importers:
         specifier: ^4.1.9
         version: 4.1.9(@types/node@25.9.4)(jsdom@29.1.1)(vite@8.0.16(@types/node@25.9.4)(terser@5.48.0)(yaml@2.9.0))
 
+  packages/client-contracts:
+    devDependencies:
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: ^4.1.9
+        version: 4.1.9(@types/node@25.9.4)(jsdom@29.1.1)(vite@8.0.16(@types/node@25.9.4)(terser@5.48.0)(yaml@2.9.0))
+
   packages/media:
     dependencies:
       livekit-client:
         specifier: 2.19.2
         version: 2.19.2(@types/dom-mediacapture-record@1.0.22)
     devDependencies:
+      jsdom:
+        specifier: ^29.1.1
+        version: 29.1.1
       typescript:
         specifier: ~6.0.3
         version: 6.0.3

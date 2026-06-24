@@ -69,6 +69,7 @@ private func openCordInitialProperties() -> [String: Any]? {
     "enabled": true,
     "autoJoinMeeting": environment["OPENCORD_E2E_AUTO_JOIN_MEETING"] == "1",
     "autoJoinVoice": environment["OPENCORD_E2E_AUTO_JOIN_VOICE"] == "1",
+    "demoWorkspace": environment["OPENCORD_E2E_DEMO_WORKSPACE"] == "1",
   ]
   if let serverUrl = environment["OPENCORD_E2E_SERVER_URL"] {
     config["serverUrl"] = serverUrl
@@ -108,7 +109,12 @@ class ReactNativeDelegate: RCTDefaultReactNativeFactoryDelegate {
 
   override func bundleURL() -> URL? {
 #if DEBUG
-    RCTBundleURLProvider.sharedSettings().jsBundleURL(forBundleRoot: "index")
+    let metroPort = ProcessInfo.processInfo.environment["RCT_METRO_PORT"] ?? "8088"
+    let packagerHost = "localhost:\(metroPort)"
+    let provider = RCTBundleURLProvider.sharedSettings()
+    provider.jsLocation = packagerHost
+
+    return provider.jsBundleURL(forBundleRoot: "index")
 #else
     Bundle.main.url(forResource: "main", withExtension: "jsbundle")
 #endif

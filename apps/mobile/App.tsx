@@ -2112,10 +2112,17 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
                 <Pressable
                   accessibilityLabel="Open voice and video settings"
                   accessibilityRole="button"
+                  hitSlop={4}
                   onPress={toggleVoiceSettings}
                   style={styles.drawerIconButton}
                 >
-                  <Text style={styles.iconOnlyButtonText}>⚙</Text>
+                  <Text
+                    allowFontScaling={false}
+                    maxFontSizeMultiplier={1}
+                    style={styles.iconOnlyButtonText}
+                  >
+                    ⚙
+                  </Text>
                 </Pressable>
               </View>
             </View>
@@ -2988,10 +2995,17 @@ function IconButton({
     <Pressable
       accessibilityLabel={accessibilityLabel}
       accessibilityRole="button"
+      hitSlop={4}
       onPress={onPress}
       style={[styles.iconOnlyButton, active ? styles.activeIconOnlyButton : null]}
     >
-      <Text style={styles.iconOnlyButtonText}>{icon}</Text>
+      <Text
+        allowFontScaling={false}
+        maxFontSizeMultiplier={1}
+        style={styles.iconOnlyButtonText}
+      >
+        {icon}
+      </Text>
     </Pressable>
   )
 }
@@ -5122,10 +5136,10 @@ const styles = StyleSheet.create({
   drawerIconButton: {
     alignItems: 'center',
     backgroundColor: '#26272b',
-    borderRadius: 16,
-    height: 32,
+    borderRadius: 20,
+    height: 40,
     justifyContent: 'center',
-    width: 32,
+    width: 40,
   },
   serverRail: {
     alignItems: 'center',
@@ -5801,7 +5815,7 @@ const styles = StyleSheet.create({
     borderBottomColor: '#2b2f2d',
     borderBottomWidth: 1,
     flexDirection: 'row',
-    gap: 8,
+    gap: 6,
     minHeight: 54,
     paddingHorizontal: 8,
     paddingVertical: 6,
@@ -5809,10 +5823,10 @@ const styles = StyleSheet.create({
   iconOnlyButton: {
     alignItems: 'center',
     backgroundColor: '#26272b',
-    borderRadius: 16,
-    height: 32,
+    borderRadius: 20,
+    height: 40,
     justifyContent: 'center',
-    width: 32,
+    width: 40,
   },
   activeIconOnlyButton: {
     backgroundColor: '#1d2b28',
@@ -5823,6 +5837,8 @@ const styles = StyleSheet.create({
     color: '#dbdee1',
     fontSize: 18,
     fontWeight: '900',
+    lineHeight: 22,
+    textAlign: 'center',
   },
   linkText: {
     color: '#86e0bb',
@@ -5847,7 +5863,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 4,
     justifyContent: 'flex-end',
-    maxWidth: 116,
+    maxWidth: 132,
   },
   searchPanel: {
     backgroundColor: '#171819',

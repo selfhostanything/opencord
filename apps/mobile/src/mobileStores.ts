@@ -21,6 +21,11 @@ export type MobilePendingAttachment = {
   contentType: string
   sizeBytes: number
   localUri: string
+  attachmentId?: string
+  downloadUrl?: string
+  errorMessage?: string
+  uploadProgress?: number
+  uploadStatus?: 'ready' | 'uploading' | 'uploaded' | 'failed'
 }
 
 export type MobileMessageTarget = {

@@ -194,6 +194,9 @@ describe('mobile app state', () => {
     expect(state.messages.at(-1)).toMatchObject({
       channelId: 'general',
       authorName: 'You',
+      authorKind: 'user',
+      attachments: [],
+      components: [],
       content: 'Hello from mobile',
       embeds: [],
       own: true,
@@ -224,6 +227,7 @@ describe('mobile app state', () => {
     expect(mobileMessageTimelineGroups(second).at(-1)).toEqual({
       id: 'group-local-first',
       authorName: 'You',
+      authorKind: 'user',
       own: true,
       messages: [
         expect.objectContaining({
@@ -251,19 +255,79 @@ describe('mobile app state', () => {
       canSend: false,
       disabledReason: 'Write a message before sending.',
       mode: 'send',
+      pendingAttachmentCount: 0,
       placeholder: 'Message #general',
     })
     expect(mobileComposerState(inGeneral, 'Ship mobile chat')).toEqual({
       canSend: true,
       disabledReason: null,
       mode: 'send',
+      pendingAttachmentCount: 0,
       placeholder: 'Message #general',
+    })
+    expect(mobileComposerState(inGeneral, '   ', { pendingAttachmentCount: 1 })).toEqual({
+      canSend: true,
+      disabledReason: null,
+      mode: 'send',
+      pendingAttachmentCount: 1,
+      placeholder: 'Message #general',
+    })
+    expect(
+      mobileComposerState(inGeneral, 'Edit text', {
+        editTargetMessageId: 'local-owned',
+        pendingAttachmentCount: 1,
+      }),
+    ).toEqual({
+      canSend: false,
+      disabledReason: 'Save the edit before adding attachments.',
+      mode: 'edit',
+      pendingAttachmentCount: 1,
+      placeholder: 'Edit message',
     })
     expect(mobileComposerState(inVoice, 'Hello voice')).toEqual({
       canSend: false,
       disabledReason: 'Text messages can be sent only in text channels.',
       mode: 'send',
+      pendingAttachmentCount: 0,
       placeholder: 'Message #standup',
+    })
+  })
+
+  it('adds uploaded attachments to local attachment-only messages', () => {
+    const loggedIn = mobileReducer(createInitialMobileState(), {
+      type: 'login.submit',
+      serverUrl: 'https://chat.example.com',
+      email: 'user@example.com',
+    })
+    const inGeneral = mobileReducer(loggedIn, { type: 'channel.select', channelId: 'general' })
+    const state = mobileReducer(inGeneral, {
+      type: 'message.send',
+      attachments: [
+        {
+          id: '01973f83-f22a-73ba-ae76-5a045c52fc95',
+          fileName: 'diagram.png',
+          contentType: 'image/png',
+          sizeBytes: 3072,
+          status: 'uploaded',
+          downloadUrl:
+            'https://chat.example.com/attachments/01973f83-f22a-73ba-ae76-5a045c52fc95/content',
+        },
+      ],
+      content: '   ',
+    })
+
+    expect(state.messages.at(-1)).toMatchObject({
+      authorKind: 'user',
+      content: '',
+      attachments: [
+        {
+          fileName: 'diagram.png',
+          contentType: 'image/png',
+          sizeBytes: 3072,
+          status: 'uploaded',
+        },
+      ],
+      own: true,
     })
   })
 
@@ -332,6 +396,8 @@ describe('mobile app state', () => {
     })
     expect(deleted.messages.at(-1)).toMatchObject({
       content: '',
+      attachments: [],
+      components: [],
       deleted: true,
       deliveryStatus: 'sent',
     })
@@ -410,7 +476,7 @@ describe('mobile app state', () => {
     expect(state.channels.find((channel) => channel.id === 'backend')?.unread).toBe(true)
   })
 
-  it('preserves rich embeds from realtime message payloads', () => {
+  it('preserves rich attachments, embeds, webhook identity, and bot components from realtime payloads', () => {
     const loggedIn = mobileReducer(createInitialMobileState(), {
       type: 'login.submit',
       serverUrl: 'https://chat.example.com',
@@ -431,6 +497,31 @@ describe('mobile app state', () => {
             channel_id: 'backend',
             author_display_name: 'Release Hook',
             content: 'Deploy preview ready',
+            webhook_username: 'Release Hook',
+            webhook_avatar_url: 'https://chat.example.com/hook.png',
+            attachments: [
+              {
+                id: '01973f83-f22a-73ba-ae76-5a045c52fc95',
+                file_name: 'local-alpha-readme.txt',
+                content_type: 'text/plain',
+                size_bytes: 87,
+                status: 'linked',
+                download_url:
+                  'https://chat.example.com/attachments/01973f83-f22a-73ba-ae76-5a045c52fc95/content',
+              },
+            ],
+            components: [
+              {
+                type: 1,
+                components: [
+                  {
+                    type: 2,
+                    custom_id: 'deploy:ack',
+                    label: 'Acknowledge',
+                  },
+                ],
+              },
+            ],
             embeds: [
               {
                 type: 'rich',
@@ -452,6 +543,24 @@ describe('mobile app state', () => {
     expect(state.messages.at(-1)).toMatchObject({
       id: 'msg-embed-1',
       authorName: 'Release Hook',
+      authorKind: 'webhook',
+      authorBadge: 'WEBHOOK',
+      avatarUrl: 'https://chat.example.com/hook.png',
+      attachments: [
+        {
+          fileName: 'local-alpha-readme.txt',
+          contentType: 'text/plain',
+          sizeBytes: 87,
+          status: 'linked',
+        },
+      ],
+      components: [
+        {
+          id: 'deploy:ack',
+          label: 'Acknowledge',
+          disabled: false,
+        },
+      ],
       embeds: [
         {
           title: 'Deploy preview ready',
@@ -462,6 +571,60 @@ describe('mobile app state', () => {
             { name: 'Version', value: '2026.06.24', inline: true },
           ],
           footer: { text: 'Release Hook' },
+        },
+      ],
+    })
+  })
+
+  it('marks component-only app messages as bot-like when the server has no author_kind yet', () => {
+    const loggedIn = mobileReducer(createInitialMobileState(), {
+      type: 'login.submit',
+      serverUrl: 'https://chat.example.com',
+      email: 'user@example.com',
+    })
+    const inBackend = mobileReducer(loggedIn, { type: 'channel.select', channelId: 'backend' })
+    const state = mobileReducer(inBackend, {
+      type: 'realtime.message_created',
+      envelope: {
+        id: 'evt_01973f83-f22a-73ba-ae76-5a045c52fc97',
+        type: 'message.created',
+        organization_id: 'org-1',
+        scope: { space_id: 'space-1', channel_id: 'backend' },
+        occurred_at: '2026-06-23T02:00:00.000Z',
+        data: {
+          message: {
+            id: 'msg-bot-1',
+            channel_id: 'backend',
+            author_display_name: 'Deploy Bot',
+            content: '',
+            components: [
+              {
+                type: 1,
+                components: [
+                  {
+                    type: 2,
+                    custom_id: 'deploy:retry',
+                    disabled: true,
+                    label: 'Retry deploy',
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      },
+    })
+
+    expect(state.messages.at(-1)).toMatchObject({
+      id: 'msg-bot-1',
+      authorKind: 'bot',
+      authorBadge: 'BOT',
+      authorName: 'Deploy Bot',
+      components: [
+        {
+          id: 'deploy:retry',
+          label: 'Retry deploy',
+          disabled: true,
         },
       ],
     })

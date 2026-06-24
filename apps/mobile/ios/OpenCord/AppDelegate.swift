@@ -82,6 +82,9 @@ private func openCordInitialProperties() -> [String: Any]? {
   if let password = environment["OPENCORD_E2E_PASSWORD"] {
     config["password"] = password
   }
+  if let preferredTextChannelName = environment["OPENCORD_E2E_TEXT_CHANNEL"] {
+    config["preferredTextChannelName"] = preferredTextChannelName
+  }
   if let preferredVoiceChannelName = environment["OPENCORD_E2E_VOICE_CHANNEL"] {
     config["preferredVoiceChannelName"] = preferredVoiceChannelName
   }

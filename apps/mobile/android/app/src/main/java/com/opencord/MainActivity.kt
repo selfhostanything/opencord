@@ -59,6 +59,7 @@ class MainActivity : ReactActivity() {
     putStringExtra(config, "serverUrl", "OPENCORD_E2E_SERVER_URL")
     putStringExtra(config, "email", "OPENCORD_E2E_EMAIL")
     putStringExtra(config, "password", "OPENCORD_E2E_PASSWORD")
+    putStringExtra(config, "preferredTextChannelName", "OPENCORD_E2E_TEXT_CHANNEL")
     putStringExtra(config, "preferredVoiceChannelName", "OPENCORD_E2E_VOICE_CHANNEL")
     putStringExtra(config, "meetingId", "OPENCORD_E2E_MEETING_ID")
     putStringExtra(config, "meetingTitle", "OPENCORD_E2E_MEETING_TITLE")

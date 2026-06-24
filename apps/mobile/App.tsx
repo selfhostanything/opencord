@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import {
   FlatList,
+  Image,
   Linking,
   Platform,
   Pressable,
@@ -13,6 +14,14 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native'
+import {
+  errorCodes as documentPickerErrorCodes,
+  isErrorWithCode as isDocumentPickerErrorWithCode,
+  keepLocalCopy,
+  pick,
+  types as documentPickerTypes,
+  type DocumentPickerResponse,
+} from '@react-native-documents/picker'
 import { RTCView } from '@livekit/react-native-webrtc'
 import Clipboard from '@react-native-clipboard/clipboard'
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -21,6 +30,7 @@ import {
   OpenCordApiError,
   type AuthResult,
   type Channel,
+  type MessageAttachment,
 } from '@opencord/api-client'
 import {
   INITIAL_REALTIME_STATUS,
@@ -55,9 +65,11 @@ import {
   type MobileMessageActionId,
   type MobileMessageActionOption,
   type MobileMessageTimelineGroup,
+  type MobileMessageAttachment,
   type MobileMediaPermissionKind,
   type MobileMediaPermissionRow,
   type MobileMessage,
+  type MobileMessageComponent,
   type MobileRichEmbed,
   type MobileWorkspaceChannelRow,
   type MobileVoiceParticipant,
@@ -66,6 +78,7 @@ import {
   useMobileChatStore,
   useMobileSessionStore,
   useMobileSettingsStore,
+  type MobilePendingAttachment,
 } from './src/mobileStores'
 import { createMobileDeviceSessionStores } from './src/mobileDeviceSessionStorage'
 import {
@@ -122,6 +135,7 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
   const { height } = useWindowDimensions()
   const e2eAutoJoinStartedRef = useRef(false)
   const e2eAutoJoinMeetingStartedRef = useRef(false)
+  const e2eAutoOpenTextChannelStartedRef = useRef(false)
   const e2eCommandPollInFlightRef = useRef(false)
   const e2eLoginStartedRef = useRef(false)
   const restoreAttemptedServerUrlsRef = useRef(new Set<string>())
@@ -138,8 +152,14 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
   const editTarget = useMobileChatStore((store) => store.editTarget)
   const messageActionSheetTarget = useMobileChatStore((store) => store.messageActionSheetTarget)
   const openMobileMessageActions = useMobileChatStore((store) => store.openMessageActions)
+  const pendingAttachmentsByChannelId = useMobileChatStore(
+    (store) => store.pendingAttachmentsByChannelId,
+  )
   const replyTarget = useMobileChatStore((store) => store.replyTarget)
   const setMobileComposerText = useMobileChatStore((store) => store.setComposerText)
+  const setMobilePendingAttachments = useMobileChatStore(
+    (store) => store.setPendingAttachments,
+  )
   const setMobileAccountMetadata = useMobileSessionStore((store) => store.setAccountMetadata)
   const setMobileRouteTarget = useMobileSessionStore((store) => store.setRouteTarget)
   const openMobileSettingsPanel = useMobileSettingsStore((store) => store.openPanel)
@@ -155,6 +175,7 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
   const activeChannel = selectedChannel(state)
   const activeServer = activeMobileServerConnection(state)
   const composerText = composerTextByChannelId[state.selectedChannelId] ?? ''
+  const pendingAttachments = pendingAttachmentsByChannelId[state.selectedChannelId] ?? []
   const timelineGroups = useMemo(() => mobileMessageTimelineGroups(state), [state])
   const permissionRows = useMemo(() => mobileMediaPermissionRows(state), [state])
   const workspaceSections = useMemo(() => mobileWorkspaceNavigatorSections(state), [state])
@@ -178,9 +199,10 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
     () =>
       mobileComposerState(state, composerText, {
         editTargetMessageId: editTarget?.messageId,
+        pendingAttachmentCount: pendingAttachments.length,
         replyTargetMessageId: replyTarget?.messageId,
       }),
-    [composerText, editTarget?.messageId, replyTarget?.messageId, state],
+    [composerText, editTarget?.messageId, pendingAttachments.length, replyTarget?.messageId, state],
   )
   const composerDisabledReason =
     composerUi.disabledReason === 'Write a message before sending.'
@@ -303,6 +325,28 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
     e2eAutoJoinStartedRef.current = true
     void joinMobileVoice(channelId)
   }, [e2eLaunchConfig, state.channels, state.screen, state.sessionToken])
+
+  useEffect(() => {
+    if (
+      e2eAutoOpenTextChannelStartedRef.current ||
+      !e2eLaunchConfig?.preferredTextChannelName ||
+      state.screen !== 'channels'
+    ) {
+      return
+    }
+
+    const channel = state.channels.find(
+      (candidate) =>
+        candidate.kind === 'text' &&
+        candidate.name.toLowerCase() === e2eLaunchConfig.preferredTextChannelName?.toLowerCase(),
+    )
+    if (!channel) {
+      return
+    }
+
+    e2eAutoOpenTextChannelStartedRef.current = true
+    dispatch({ type: 'channel.select', channelId: channel.id })
+  }, [e2eLaunchConfig?.preferredTextChannelName, state.channels, state.screen])
 
   useEffect(() => {
     if (
@@ -617,6 +661,84 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
     setServerManagerOpen(false)
   }
 
+  async function pickMobileAttachments() {
+    if (editTarget) {
+      setChatFeedback('Save the edit before adding attachments.')
+      return
+    }
+
+    try {
+      const picked = await pick({
+        allowMultiSelection: true,
+        mode: 'import',
+        type: [documentPickerTypes.allFiles],
+      })
+      if (picked.length === 0) {
+        return
+      }
+
+      const copies = await keepLocalCopy({
+        destination: 'cachesDirectory',
+        files: picked.map((file) => ({
+          fileName: file.name ?? fallbackAttachmentFileName(file),
+          uri: file.uri,
+        })) as [{ fileName: string; uri: string }, ...Array<{ fileName: string; uri: string }>],
+      })
+      const attachments = picked.map((file, index) => {
+        const copy = copies[index]
+        return mobilePendingAttachmentFromPickerFile(
+          file,
+          copy?.status === 'success' ? copy.localUri : file.uri,
+          index,
+        )
+      })
+
+      setMobilePendingAttachments(state.selectedChannelId, [
+        ...pendingAttachments,
+        ...attachments,
+      ])
+      setChatFeedback(null)
+    } catch (error) {
+      if (
+        isDocumentPickerErrorWithCode(error) &&
+        error.code === documentPickerErrorCodes.OPERATION_CANCELED
+      ) {
+        return
+      }
+
+      setChatFeedback(errorMessage(error, 'Attachment picker is unavailable.'))
+    }
+  }
+
+  function removePendingAttachment(attachmentId: string) {
+    setMobilePendingAttachments(
+      state.selectedChannelId,
+      pendingAttachments.filter((attachment) => attachment.id !== attachmentId),
+    )
+  }
+
+  async function retryPendingAttachmentUpload(attachmentId: string) {
+    const uploaded = await uploadPendingAttachments(state.selectedChannelId, { attachmentId })
+    if (uploaded) {
+      setChatFeedback(null)
+    }
+  }
+
+  function updatePendingAttachment(
+    channelId: string,
+    attachmentId: string,
+    patch: Partial<MobilePendingAttachment>,
+  ) {
+    const currentAttachments =
+      useMobileChatStore.getState().pendingAttachmentsByChannelId[channelId] ?? []
+    setMobilePendingAttachments(
+      channelId,
+      currentAttachments.map((attachment) =>
+        attachment.id === attachmentId ? { ...attachment, ...patch } : attachment,
+      ),
+    )
+  }
+
   function openMobileChannel(channel: Pick<MobileChannel, 'id' | 'kind'>) {
     const routeTarget = mobileRouteTargetForChannel(state, channel.id)
     if (routeTarget) {
@@ -636,7 +758,7 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
     setSettingsOpen((current) => !current)
   }
 
-  function sendMessage() {
+  async function sendMessage() {
     if (!composerUi.canSend) {
       return
     }
@@ -648,8 +770,13 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
         content: composerText,
       })
     } else {
+      const attachments = await uploadPendingAttachments(state.selectedChannelId)
+      if (!attachments) {
+        return
+      }
       dispatch({
         type: 'message.send',
+        attachments,
         content: composerText,
         replyToMessageId: replyTarget?.messageId,
       })
@@ -657,6 +784,79 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
     clearMobileComposer(state.selectedChannelId)
     clearMobileDraftTarget()
     setChatFeedback(null)
+  }
+
+  async function uploadPendingAttachments(
+    channelId: string,
+    options: { attachmentId?: string } = {},
+  ): Promise<MobileMessageAttachment[] | null> {
+    const attachments = (pendingAttachmentsByChannelId[channelId] ?? []).filter(
+      (attachment) => !options.attachmentId || attachment.id === options.attachmentId,
+    )
+    if (attachments.length === 0) {
+      return []
+    }
+    if (!state.sessionToken) {
+      setChatFeedback('Sign in before sending attachments.')
+      return null
+    }
+
+    const client = createOpenCordApiClient({
+      baseUrl: state.serverUrl,
+      sessionToken: state.sessionToken,
+    })
+    const uploadedAttachments: MobileMessageAttachment[] = []
+
+    for (const attachment of attachments) {
+      if (
+        attachment.uploadStatus === 'uploaded' &&
+        attachment.attachmentId &&
+        attachment.downloadUrl
+      ) {
+        uploadedAttachments.push(mobileMessageAttachmentFromPendingAttachment(attachment))
+        continue
+      }
+
+      try {
+        updatePendingAttachment(channelId, attachment.id, {
+          errorMessage: undefined,
+          uploadProgress: 0.15,
+          uploadStatus: 'uploading',
+        })
+        const presign = await client.presignAttachment({
+          channelId,
+          contentType: attachment.contentType,
+          fileName: attachment.fileName,
+          sizeBytes: attachment.sizeBytes,
+        })
+        updatePendingAttachment(channelId, attachment.id, {
+          attachmentId: presign.attachment.id,
+          uploadProgress: 0.45,
+        })
+        const body = await mobileAttachmentBody(attachment.localUri)
+        const uploaded = await client.uploadAttachmentContent(
+          presign.attachment.id,
+          body,
+          attachment.contentType,
+        )
+        updatePendingAttachment(channelId, attachment.id, {
+          attachmentId: uploaded.id,
+          downloadUrl: uploaded.downloadUrl,
+          uploadProgress: 1,
+          uploadStatus: 'uploaded',
+        })
+        uploadedAttachments.push(mobileMessageAttachmentFromApiAttachment(uploaded))
+      } catch (error) {
+        updatePendingAttachment(channelId, attachment.id, {
+          errorMessage: errorMessage(error, 'Unable to upload attachment.'),
+          uploadStatus: 'failed',
+        })
+        setChatFeedback(errorMessage(error, 'Unable to upload attachment.'))
+        return null
+      }
+    }
+
+    return uploadedAttachments
   }
 
   function handleMessageAction(actionId: MobileMessageActionId, message: MobileMessage) {
@@ -1174,8 +1374,25 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
           ) : null}
         </View>
       ) : null}
+      {pendingAttachments.length > 0 ? (
+        <PendingAttachmentTray
+          attachments={pendingAttachments}
+          onRemove={removePendingAttachment}
+          onRetry={(attachmentId) => {
+            void retryPendingAttachmentUpload(attachmentId)
+          }}
+        />
+      ) : null}
       <View style={styles.composer}>
-        <Pressable accessibilityLabel="Add attachment" accessibilityRole="button" style={styles.composerIconButton}>
+        <Pressable
+          accessibilityLabel="Add attachment"
+          accessibilityRole="button"
+          disabled={Boolean(editTarget)}
+          onPress={() => {
+            void pickMobileAttachments()
+          }}
+          style={[styles.composerIconButton, editTarget ? styles.disabledIconButton : null]}
+        >
           <Text style={styles.composerIconText}>+</Text>
         </Pressable>
         <TextInput
@@ -1189,7 +1406,9 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
         <Pressable
           accessibilityRole="button"
           disabled={!composerUi.canSend}
-          onPress={sendMessage}
+          onPress={() => {
+            void sendMessage()
+          }}
           style={[styles.sendButton, !composerUi.canSend ? styles.disabledSendButton : null]}
         >
           <Text style={styles.primaryButtonText}>
@@ -1681,11 +1900,16 @@ function MessageGroup({
   return (
     <View style={[styles.messageGroup, group.own ? styles.ownMessageGroup : null]}>
       <View style={styles.messageAvatar}>
-        <Text style={styles.messageAvatarText}>{initialsForLabel(group.authorName)}</Text>
+        {group.avatarUrl ? (
+          <Image source={{ uri: group.avatarUrl }} style={styles.messageAvatarImage} />
+        ) : (
+          <Text style={styles.messageAvatarText}>{initialsForLabel(group.authorName)}</Text>
+        )}
       </View>
       <View style={styles.messageGroupBody}>
         <View style={styles.messageGroupHeader}>
           <Text style={styles.messageAuthor}>{group.authorName}</Text>
+          {group.authorBadge ? <Text style={styles.authorBadge}>{group.authorBadge}</Text> : null}
           <Text style={styles.messageTime}>{group.messages[0]?.time}</Text>
         </View>
         {group.messages.map((message) => (
@@ -1726,7 +1950,9 @@ function MessageBubble({
       ) : message.content ? (
         <MessageContentText content={message.content} />
       ) : null}
+      <MobileMessageAttachmentList attachments={message.attachments} />
       <MobileRichEmbedList embeds={message.embeds} />
+      <MobileMessageComponentList components={message.components} />
       {message.edited ? <Text style={styles.messageMeta}>edited</Text> : null}
       {message.deliveryStatus && message.deliveryStatus !== 'sent' ? (
         <View style={styles.deliveryRow}>
@@ -1879,6 +2105,140 @@ function ComposerContextRow({
   )
 }
 
+function PendingAttachmentTray({
+  attachments,
+  onRemove,
+  onRetry,
+}: {
+  attachments: MobilePendingAttachment[]
+  onRemove: (attachmentId: string) => void
+  onRetry: (attachmentId: string) => void
+}) {
+  return (
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      style={styles.pendingAttachmentScroller}
+      contentContainerStyle={styles.pendingAttachmentList}
+    >
+      {attachments.map((attachment) => (
+        <View key={attachment.id} style={styles.pendingAttachmentCard}>
+          <Text numberOfLines={1} style={styles.pendingAttachmentName}>
+            {attachment.fileName}
+          </Text>
+          <Text style={styles.attachmentMetaText}>
+            {attachment.contentType} · {formatAttachmentSize(attachment.sizeBytes)}
+          </Text>
+          <Text
+            style={[
+              styles.attachmentMetaText,
+              attachment.uploadStatus === 'failed' ? styles.attachmentErrorText : null,
+            ]}
+          >
+            {pendingAttachmentStatusLabel(attachment)}
+          </Text>
+          <View style={styles.pendingAttachmentActions}>
+            {attachment.uploadStatus === 'failed' ? (
+              <Pressable
+                accessibilityLabel={`Retry ${attachment.fileName}`}
+                accessibilityRole="button"
+                onPress={() => onRetry(attachment.id)}
+                style={styles.retryAttachmentButton}
+              >
+                <Text style={styles.headerActionText}>Retry</Text>
+              </Pressable>
+            ) : null}
+            <Pressable
+              accessibilityLabel={`Remove ${attachment.fileName}`}
+              accessibilityRole="button"
+              onPress={() => onRemove(attachment.id)}
+              style={styles.removeAttachmentButton}
+            >
+              <Text style={styles.headerActionText}>Remove</Text>
+            </Pressable>
+          </View>
+        </View>
+      ))}
+    </ScrollView>
+  )
+}
+
+function MobileMessageAttachmentList({
+  attachments,
+}: {
+  attachments: MobileMessageAttachment[]
+}) {
+  if (attachments.length === 0) {
+    return null
+  }
+
+  return (
+    <View style={styles.messageAttachmentList}>
+      {attachments.map((attachment) => (
+        <Pressable
+          accessibilityLabel={`Open attachment ${attachment.fileName}`}
+          accessibilityRole="button"
+          key={attachment.id}
+          onPress={() => {
+            void openAttachment(attachment)
+          }}
+          style={styles.messageAttachmentCard}
+        >
+          {attachment.contentType.startsWith('image/') && attachment.downloadUrl ? (
+            <Image source={{ uri: attachment.downloadUrl }} style={styles.messageAttachmentImage} />
+          ) : (
+            <View style={styles.messageAttachmentIcon}>
+              <Text style={styles.messageAttachmentIconText}>
+                {attachmentIconLabel(attachment)}
+              </Text>
+            </View>
+          )}
+          <View style={styles.messageAttachmentCopy}>
+            <Text numberOfLines={1} style={styles.messageAttachmentName}>
+              {attachment.fileName}
+            </Text>
+            <Text style={styles.attachmentMetaText}>
+              {attachment.contentType} · {formatAttachmentSize(attachment.sizeBytes)}
+            </Text>
+          </View>
+        </Pressable>
+      ))}
+    </View>
+  )
+}
+
+function MobileMessageComponentList({
+  components,
+}: {
+  components: MobileMessageComponent[]
+}) {
+  if (components.length === 0) {
+    return null
+  }
+
+  return (
+    <View style={styles.messageComponentList}>
+      {components.map((component) => (
+        <Pressable
+          accessibilityLabel={`Bot action ${component.label}`}
+          accessibilityRole="button"
+          disabled
+          key={component.id}
+          style={[
+            styles.messageComponentButton,
+            component.disabled ? styles.disabledMessageComponentButton : null,
+          ]}
+        >
+          <Text style={styles.messageComponentText}>{component.label}</Text>
+        </Pressable>
+      ))}
+      <Text style={styles.componentCompatibilityNote}>
+        Bot actions can be viewed here; use web or desktop to run them.
+      </Text>
+    </View>
+  )
+}
+
 function MobileRichEmbedList({ embeds }: { embeds: MobileRichEmbed[] }) {
   if (embeds.length === 0) {
     return null
@@ -1932,6 +2292,109 @@ function mobileRichEmbedAccentColor(color: number | undefined) {
 
   const normalized = Math.max(0, Math.min(0xffffff, Math.trunc(color)))
   return `#${normalized.toString(16).padStart(6, '0')}`
+}
+
+function mobilePendingAttachmentFromPickerFile(
+  file: DocumentPickerResponse,
+  localUri: string,
+  index: number,
+): MobilePendingAttachment {
+  return {
+    id: `pending-${Date.now()}-${index}`,
+    contentType: file.type ?? 'application/octet-stream',
+    fileName: file.name ?? fallbackAttachmentFileName(file),
+    localUri,
+    sizeBytes: file.size ?? 1,
+    uploadProgress: 0,
+    uploadStatus: 'ready',
+  }
+}
+
+function fallbackAttachmentFileName(file: Pick<DocumentPickerResponse, 'type' | 'uri'>) {
+  const extension = file.type?.split('/').at(-1)?.replace(/[^a-z0-9]+/gi, '').toLowerCase()
+  return `attachment-${Date.now()}${extension ? `.${extension}` : ''}`
+}
+
+async function mobileAttachmentBody(localUri: string): Promise<BodyInit> {
+  const response = await fetch(localUri)
+  if (!response.ok) {
+    throw new Error(`Unable to read picked file: HTTP ${response.status}`)
+  }
+
+  return response.blob()
+}
+
+function mobileMessageAttachmentFromApiAttachment(
+  attachment: MessageAttachment,
+): MobileMessageAttachment {
+  return {
+    id: attachment.id,
+    contentType: attachment.contentType,
+    downloadUrl: attachment.downloadUrl ?? '',
+    fileName: attachment.fileName,
+    sizeBytes: attachment.sizeBytes,
+    status: attachment.status,
+  }
+}
+
+function mobileMessageAttachmentFromPendingAttachment(
+  attachment: MobilePendingAttachment,
+): MobileMessageAttachment {
+  return {
+    id: attachment.attachmentId ?? attachment.id,
+    contentType: attachment.contentType,
+    downloadUrl: attachment.downloadUrl ?? '',
+    fileName: attachment.fileName,
+    sizeBytes: attachment.sizeBytes,
+    status: 'uploaded',
+  }
+}
+
+async function openAttachment(attachment: MobileMessageAttachment) {
+  if (!attachment.downloadUrl) {
+    return
+  }
+
+  await Linking.openURL(attachment.downloadUrl)
+}
+
+function attachmentIconLabel(attachment: MobileMessageAttachment) {
+  if (attachment.contentType === 'application/pdf') {
+    return 'PDF'
+  }
+  if (attachment.contentType.startsWith('text/')) {
+    return 'TXT'
+  }
+  if (attachment.contentType.includes('zip')) {
+    return 'ZIP'
+  }
+
+  return 'FILE'
+}
+
+function formatAttachmentSize(sizeBytes: number) {
+  if (sizeBytes < 1024) {
+    return `${sizeBytes} B`
+  }
+  if (sizeBytes < 1024 * 1024) {
+    return `${(sizeBytes / 1024).toFixed(1)} KB`
+  }
+
+  return `${(sizeBytes / 1024 / 1024).toFixed(1)} MB`
+}
+
+function pendingAttachmentStatusLabel(attachment: MobilePendingAttachment) {
+  switch (attachment.uploadStatus) {
+    case 'failed':
+      return attachment.errorMessage ?? 'Upload failed'
+    case 'uploaded':
+      return 'Uploaded'
+    case 'uploading':
+      return `Uploading ${Math.round((attachment.uploadProgress ?? 0) * 100)}%`
+    case 'ready':
+    case undefined:
+      return 'Ready to send'
+  }
 }
 
 async function ensureMobileWorkspaceChannels(
@@ -2611,6 +3074,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     width: 32,
   },
+  messageAvatarImage: {
+    borderRadius: 16,
+    height: 32,
+    width: 32,
+  },
   messageAvatarText: {
     color: '#86e0bb',
     fontSize: 12,
@@ -2642,6 +3110,16 @@ const styles = StyleSheet.create({
     color: '#f5f6f3',
     fontSize: 13,
     fontWeight: '800',
+  },
+  authorBadge: {
+    backgroundColor: '#5865f2',
+    borderRadius: 4,
+    color: '#ffffff',
+    fontSize: 9,
+    fontWeight: '900',
+    overflow: 'hidden',
+    paddingHorizontal: 5,
+    paddingVertical: 2,
   },
   messageContent: {
     color: '#edf1ea',
@@ -2703,6 +3181,88 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     paddingHorizontal: 8,
     paddingVertical: 4,
+  },
+  messageAttachmentList: {
+    gap: 8,
+    marginTop: 8,
+  },
+  messageAttachmentCard: {
+    alignItems: 'center',
+    backgroundColor: '#22252a',
+    borderColor: '#3a4048',
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 10,
+    maxWidth: 340,
+    minHeight: 64,
+    overflow: 'hidden',
+    padding: 8,
+  },
+  messageAttachmentImage: {
+    backgroundColor: '#111315',
+    borderRadius: 6,
+    height: 74,
+    width: 98,
+  },
+  messageAttachmentIcon: {
+    alignItems: 'center',
+    backgroundColor: '#31363f',
+    borderRadius: 6,
+    height: 44,
+    justifyContent: 'center',
+    width: 54,
+  },
+  messageAttachmentIconText: {
+    color: '#f2f3f5',
+    fontSize: 11,
+    fontWeight: '900',
+  },
+  messageAttachmentCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  messageAttachmentName: {
+    color: '#e7e9ec',
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  attachmentMetaText: {
+    color: '#aeb4bc',
+    fontSize: 11,
+    marginTop: 2,
+  },
+  attachmentErrorText: {
+    color: '#ffb4ac',
+  },
+  messageComponentList: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 8,
+    maxWidth: 340,
+  },
+  messageComponentButton: {
+    alignItems: 'center',
+    backgroundColor: '#5865f2',
+    borderRadius: 6,
+    justifyContent: 'center',
+    minHeight: 34,
+    paddingHorizontal: 12,
+  },
+  disabledMessageComponentButton: {
+    backgroundColor: '#3a3d42',
+  },
+  messageComponentText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  componentCompatibilityNote: {
+    color: '#aab2a8',
+    flexBasis: '100%',
+    fontSize: 11,
+    fontWeight: '700',
   },
   embedList: {
     gap: 8,
@@ -2863,6 +3423,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     width: 36,
   },
+  disabledIconButton: {
+    opacity: 0.45,
+  },
   composerIconText: {
     color: '#dbdee1',
     fontSize: 22,
@@ -2891,6 +3454,53 @@ const styles = StyleSheet.create({
   disabledSendButton: {
     backgroundColor: '#353535',
     opacity: 0.65,
+  },
+  pendingAttachmentScroller: {
+    borderTopColor: '#2b2f2d',
+    borderTopWidth: 1,
+    maxHeight: 118,
+  },
+  pendingAttachmentList: {
+    gap: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  pendingAttachmentCard: {
+    backgroundColor: '#24272a',
+    borderColor: '#3b4140',
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: 4,
+    minHeight: 88,
+    padding: 10,
+    width: 210,
+  },
+  pendingAttachmentName: {
+    color: '#f2f3f5',
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  pendingAttachmentActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  removeAttachmentButton: {
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    backgroundColor: '#3a3d42',
+    borderRadius: 7,
+    justifyContent: 'center',
+    minHeight: 28,
+    paddingHorizontal: 9,
+  },
+  retryAttachmentButton: {
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    backgroundColor: '#5865f2',
+    borderRadius: 7,
+    justifyContent: 'center',
+    minHeight: 28,
+    paddingHorizontal: 9,
   },
   accountBar: {
     alignItems: 'center',

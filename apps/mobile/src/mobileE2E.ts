@@ -9,6 +9,7 @@ export type MobileE2ELaunchConfig = {
   meetingId: string | null
   meetingTitle: string | null
   password: string
+  preferredTextChannelName: string | null
   preferredVoiceChannelName: string | null
   rememberDevice: boolean
   restoreOnly: boolean
@@ -46,6 +47,7 @@ export function normalizeMobileE2ELaunchConfig(value: unknown): MobileE2ELaunchC
     meetingId: trimmedString(candidate.meetingId),
     meetingTitle: trimmedString(candidate.meetingTitle),
     password,
+    preferredTextChannelName: trimmedString(candidate.preferredTextChannelName),
     preferredVoiceChannelName: trimmedString(candidate.preferredVoiceChannelName),
     rememberDevice: candidate.rememberDevice !== false,
     restoreOnly,

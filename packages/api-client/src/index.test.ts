@@ -16,6 +16,8 @@ const requiredOpenApiPaths = [
   '/push-tokens',
   '/voice/channels/{channel_id}/join',
   '/join/{join_slug}',
+  '/attachments/presign',
+  '/attachments/{attachment_id}/content',
   '/organizations/{organization_id}/bot-applications',
   '/channels/{channel_id}/webhooks',
 ] as const satisfies readonly (keyof paths)[]
@@ -653,6 +655,113 @@ describe('OpenCord API client', () => {
           'https://chat.example.com/attachments/01973f83-f22a-73ba-ae76-5a045c52fc95/content',
       }),
     ])
+  })
+
+  it('presigns and uploads attachment content with bearer auth', async () => {
+    const fetchMock = vi
+      .fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>()
+      .mockResolvedValueOnce(
+        jsonResponse(
+          {
+            attachment: {
+              id: '01973f83-f22a-73ba-ae76-5a045c52fc95',
+              organization_id: '01973f83-f22a-73ba-ae76-5a045c52fc91',
+              space_id: '01973f83-f22a-73ba-ae76-5a045c52fc92',
+              channel_id: '01973f83-f22a-73ba-ae76-5a045c52fc93',
+              message_id: null,
+              uploader_user_id: '01973f83-f22a-73ba-ae76-5a045c52fc90',
+              file_name: 'diagram.png',
+              content_type: 'image/png',
+              size_bytes: 3,
+              status: 'pending',
+              download_url:
+                'https://chat.example.com/attachments/01973f83-f22a-73ba-ae76-5a045c52fc95/content',
+            },
+            upload: {
+              method: 'PUT',
+              url: 'https://chat.example.com/attachments/01973f83-f22a-73ba-ae76-5a045c52fc95/content',
+            },
+          },
+          { status: 201 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          attachment: {
+            id: '01973f83-f22a-73ba-ae76-5a045c52fc95',
+            organization_id: '01973f83-f22a-73ba-ae76-5a045c52fc91',
+            space_id: '01973f83-f22a-73ba-ae76-5a045c52fc92',
+            channel_id: '01973f83-f22a-73ba-ae76-5a045c52fc93',
+            message_id: null,
+            uploader_user_id: '01973f83-f22a-73ba-ae76-5a045c52fc90',
+            file_name: 'diagram.png',
+            content_type: 'image/png',
+            size_bytes: 3,
+            status: 'uploaded',
+            download_url:
+              'https://chat.example.com/attachments/01973f83-f22a-73ba-ae76-5a045c52fc95/content',
+          },
+        }),
+      )
+    const client = createOpenCordApiClient({
+      baseUrl: 'https://chat.example.com',
+      fetch: fetchMock,
+      sessionToken: 'session-token',
+    })
+
+    await expect(
+      client.presignAttachment({
+        channelId: '01973f83-f22a-73ba-ae76-5a045c52fc93',
+        contentType: 'image/png',
+        fileName: 'diagram.png',
+        sizeBytes: 3,
+      }),
+    ).resolves.toMatchObject({
+      attachment: {
+        id: '01973f83-f22a-73ba-ae76-5a045c52fc95',
+        fileName: 'diagram.png',
+        status: 'pending',
+      },
+      upload: {
+        method: 'PUT',
+        url: 'https://chat.example.com/attachments/01973f83-f22a-73ba-ae76-5a045c52fc95/content',
+      },
+    })
+    const body = new Uint8Array([1, 2, 3])
+    await expect(
+      client.uploadAttachmentContent('01973f83-f22a-73ba-ae76-5a045c52fc95', body, 'image/png'),
+    ).resolves.toMatchObject({
+      id: '01973f83-f22a-73ba-ae76-5a045c52fc95',
+      status: 'uploaded',
+    })
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, 'https://chat.example.com/attachments/presign', {
+      body: JSON.stringify({
+        channel_id: '01973f83-f22a-73ba-ae76-5a045c52fc93',
+        file_name: 'diagram.png',
+        content_type: 'image/png',
+        size_bytes: 3,
+      }),
+      headers: {
+        Accept: 'application/json',
+        Authorization: 'Bearer session-token',
+        'Content-Type': 'application/json',
+      },
+      method: 'POST',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      'https://chat.example.com/attachments/01973f83-f22a-73ba-ae76-5a045c52fc95/content',
+      {
+        body,
+        headers: {
+          Accept: 'application/json',
+          Authorization: 'Bearer session-token',
+          'Content-Type': 'image/png',
+        },
+        method: 'PUT',
+      },
+    )
   })
 
   it('registers push tokens with bearer auth and maps masked responses', async () => {

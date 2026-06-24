@@ -46,8 +46,6 @@
 	</dict>
 	<key>NSCameraUsageDescription</key>
 	<string>Used when you turn on video in meetings.</string>
-	<key>NSLocationWhenInUseUsageDescription</key>
-	<string></string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Used when you speak in voice channels or meetings.</string>
 	<key>RCTNewArchEnabled</key>

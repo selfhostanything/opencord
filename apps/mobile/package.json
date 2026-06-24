@@ -24,6 +24,7 @@
     "@opencord/server-connections": "workspace:*",
     "@react-native-async-storage/async-storage": "^3.1.1",
     "@react-native-clipboard/clipboard": "^1.16.3",
+    "@react-native-documents/picker": "12.0.1",
     "livekit-client": "2.19.2",
     "react": "^19.2.7",
     "react-native": "^0.86.0",

@@ -184,6 +184,23 @@ export type MessageAttachment = {
   downloadUrl: string
 }
 
+export type PresignAttachmentRequest = {
+  channelId: string
+  fileName: string
+  contentType: string
+  sizeBytes: number
+}
+
+export type AttachmentUploadInstruction = {
+  method: string
+  url: string
+}
+
+export type AttachmentPresign = {
+  attachment: MessageAttachment
+  upload: AttachmentUploadInstruction
+}
+
 export type CreateMeetingRequest = {
   spaceId?: string | null
   channelId?: string | null
@@ -563,6 +580,16 @@ type MessageAttachmentPayload = {
   size_bytes?: unknown
   status?: unknown
   download_url?: unknown
+}
+
+type AttachmentUploadPayload = {
+  method?: unknown
+  url?: unknown
+}
+
+type AttachmentPresignPayload = {
+  attachment?: unknown
+  upload?: unknown
 }
 
 type MessageResourcePayload = {
@@ -1018,6 +1045,49 @@ export class OpenCordApiClient {
     )
 
     return arrayValue(payload.messages).map(messageFromPayload)
+  }
+
+  async presignAttachment(request: PresignAttachmentRequest): Promise<AttachmentPresign> {
+    const payload = await this.requestJson<AttachmentPresignPayload>('/attachments/presign', {
+      body: JSON.stringify({
+        channel_id: request.channelId,
+        file_name: request.fileName,
+        content_type: request.contentType,
+        size_bytes: request.sizeBytes,
+      }),
+      method: 'POST',
+    })
+
+    return attachmentPresignFromPayload(payload)
+  }
+
+  async uploadAttachmentContent(
+    attachmentId: string,
+    body: BodyInit,
+    contentType: string,
+  ): Promise<MessageAttachment> {
+    const headers: Record<string, string> = {
+      Accept: 'application/json',
+      'Content-Type': contentType || 'application/octet-stream',
+    }
+    if (this.sessionToken) {
+      headers.Authorization = `Bearer ${this.sessionToken}`
+    }
+    const response = await this.fetchImpl(
+      this.endpoint(`/attachments/${encodeURIComponent(attachmentId)}/content`),
+      {
+        body,
+        headers,
+        method: 'PUT',
+      },
+    )
+    const payload = await parseJson(response)
+
+    if (!response.ok) {
+      throw new OpenCordApiError(response.status, errorMessage(payload, response.status), payload)
+    }
+
+    return messageAttachmentFromPayload(objectValue(payload).attachment)
   }
 
   async updateMessage(messageId: string, request: UpdateMessageRequest): Promise<Message> {
@@ -1704,6 +1774,19 @@ function messageAttachmentFromPayload(value: unknown): MessageAttachment {
     sizeBytes: numberValue(payload.size_bytes, 0),
     status: stringValue(payload.status, ''),
     downloadUrl: stringValue(payload.download_url, ''),
+  }
+}
+
+function attachmentPresignFromPayload(value: unknown): AttachmentPresign {
+  const payload = objectValue(value) as AttachmentPresignPayload
+  const upload = objectValue(payload.upload) as AttachmentUploadPayload
+
+  return {
+    attachment: messageAttachmentFromPayload(payload.attachment),
+    upload: {
+      method: stringValue(upload.method, 'PUT'),
+      url: stringValue(upload.url, ''),
+    },
   }
 }
 

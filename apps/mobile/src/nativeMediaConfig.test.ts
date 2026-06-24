@@ -59,6 +59,8 @@ describe('native mobile media configuration', () => {
     expect(mainActivity).toContain('"OPENCORD_E2E_REMEMBER_DEVICE"')
     expect(mainActivity).toContain('"restoreOnly"')
     expect(mainActivity).toContain('"OPENCORD_E2E_RESTORE_ONLY"')
+    expect(mainActivity).toContain('"preferredTextChannelName"')
+    expect(mainActivity).toContain('"OPENCORD_E2E_TEXT_CHANNEL"')
   })
 
   it('registers LiveKit globals before the native app component mounts', () => {
@@ -92,6 +94,8 @@ describe('native mobile media configuration', () => {
     expect(appDelegate).toContain('OPENCORD_E2E_REMEMBER_DEVICE')
     expect(appDelegate).toContain('"restoreOnly"')
     expect(appDelegate).toContain('OPENCORD_E2E_RESTORE_ONLY')
+    expect(appDelegate).toContain('"preferredTextChannelName"')
+    expect(appDelegate).toContain('OPENCORD_E2E_TEXT_CHANNEL')
   })
 
   it('links iOS native storage modules used for remembered device sessions', () => {

@@ -79,7 +79,12 @@ export type MobileMessage = {
   id: string
   channelId: string
   authorName: string
+  authorKind: MobileMessageAuthorKind
+  authorBadge?: string
+  avatarUrl?: string
   content: string
+  attachments: MobileMessageAttachment[]
+  components: MobileMessageComponent[]
   embeds: MobileRichEmbed[]
   time: string
   own: boolean
@@ -92,6 +97,23 @@ export type MobileMessage = {
   pinned?: boolean
   reactions?: MobileMessageReaction[]
   replyToMessageId?: string
+}
+
+export type MobileMessageAuthorKind = 'user' | 'bot' | 'webhook' | 'system'
+
+export type MobileMessageAttachment = {
+  id: string
+  fileName: string
+  contentType: string
+  sizeBytes: number
+  status: string
+  downloadUrl: string
+}
+
+export type MobileMessageComponent = {
+  id: string
+  label: string
+  disabled: boolean
 }
 
 export type MobileMessageReaction = {
@@ -110,6 +132,9 @@ export type MobileMentionToken = {
 export type MobileMessageTimelineGroup = {
   id: string
   authorName: string
+  authorKind: MobileMessageAuthorKind
+  authorBadge?: string
+  avatarUrl?: string
   own: boolean
   messages: MobileMessage[]
 }
@@ -134,6 +159,7 @@ export type MobileComposerUiState = {
   disabledReason: string | null
   mode: 'send' | 'reply' | 'edit'
   placeholder: string
+  pendingAttachmentCount: number
 }
 
 export type MobileRichEmbed = {
@@ -256,6 +282,7 @@ export type MobileAction =
   | {
       type: 'message.send'
       content: string
+      attachments?: MobileMessageAttachment[]
       clientId?: string
       deliveryStatus?: MobileMessage['deliveryStatus']
       errorMessage?: string
@@ -374,8 +401,22 @@ const initialMessages: MobileMessage[] = [
   {
     id: 'seed-1',
     channelId: 'general',
-    authorName: 'Mira',
-    content: 'Mobile shell is ready for login, channel navigation, and chat state.',
+    authorName: 'Release Hook',
+    authorKind: 'webhook',
+    authorBadge: 'WEBHOOK',
+    avatarUrl: 'https://chat.example.com/hook.png',
+    content: 'Deploy preview ready',
+    attachments: [
+      {
+        id: 'seed-attachment-1',
+        fileName: 'local-alpha-readme.txt',
+        contentType: 'text/plain',
+        sizeBytes: 87,
+        status: 'linked',
+        downloadUrl: 'https://chat.example.com/attachments/seed-attachment-1/content',
+      },
+    ],
+    components: [],
     embeds: [
       {
         type: 'rich',
@@ -395,10 +436,39 @@ const initialMessages: MobileMessage[] = [
     mentions: [],
   },
   {
+    id: 'seed-bot-1',
+    channelId: 'general',
+    authorName: 'OpenCord Bot',
+    authorKind: 'bot',
+    authorBadge: 'BOT',
+    content: 'Use the buttons from desktop or web while native component actions are being wired.',
+    attachments: [],
+    components: [
+      {
+        id: 'seed:ack',
+        label: 'Acknowledge',
+        disabled: false,
+      },
+      {
+        id: 'seed:details',
+        label: 'View details',
+        disabled: true,
+      },
+    ],
+    embeds: [],
+    time: '09:12',
+    own: false,
+    deliveryStatus: 'sent',
+    mentions: [],
+  },
+  {
     id: 'seed-2',
     channelId: 'backend',
     authorName: 'Thanet',
+    authorKind: 'user',
     content: 'Shared API and realtime packages are available to mobile now.',
+    attachments: [],
+    components: [],
     embeds: [],
     time: '09:16',
     own: false,
@@ -555,7 +625,8 @@ export function mobileReducer(state: MobileAppState, action: MobileAction): Mobi
       }
     case 'message.send': {
       const content = action.content.trim()
-      if (!content) {
+      const attachments = action.attachments ?? []
+      if (!content && attachments.length === 0) {
         return state
       }
       const channel = selectedChannel(state)
@@ -572,6 +643,9 @@ export function mobileReducer(state: MobileAppState, action: MobileAction): Mobi
             id: action.clientId ?? `local-${Date.now()}`,
             channelId: state.selectedChannelId,
             authorName: 'You',
+            authorKind: 'user',
+            attachments,
+            components: [],
             content,
             deliveryError: deliveryStatus === 'failed' ? action.errorMessage ?? 'Unable to send.' : null,
             deliveryStatus,
@@ -630,6 +704,8 @@ export function mobileReducer(state: MobileAppState, action: MobileAction): Mobi
                 ...message,
                 content: '',
                 deleted: true,
+                attachments: [],
+                components: [],
                 deliveryError: null,
                 deliveryStatus: 'sent',
                 embeds: [],
@@ -984,6 +1060,7 @@ export function mobileMessageTimelineGroups(
     if (
       currentGroup &&
       currentGroup.authorName === message.authorName &&
+      currentGroup.authorKind === message.authorKind &&
       currentGroup.own === message.own
     ) {
       currentGroup.messages.push(message)
@@ -993,6 +1070,9 @@ export function mobileMessageTimelineGroups(
     groups.push({
       id: `group-${message.id}`,
       authorName: message.authorName,
+      authorKind: message.authorKind,
+      authorBadge: message.authorBadge,
+      avatarUrl: message.avatarUrl,
       own: message.own,
       messages: [message],
     })
@@ -1006,9 +1086,11 @@ export function mobileComposerState(
   content: string,
   {
     editTargetMessageId,
+    pendingAttachmentCount = 0,
     replyTargetMessageId,
   }: {
     editTargetMessageId?: string | null
+    pendingAttachmentCount?: number
     replyTargetMessageId?: string | null
   } = {},
 ): MobileComposerUiState {
@@ -1026,15 +1108,27 @@ export function mobileComposerState(
       canSend: false,
       disabledReason: 'Text messages can be sent only in text channels.',
       mode,
+      pendingAttachmentCount,
       placeholder,
     }
   }
 
-  if (!content.trim()) {
+  if (mode === 'edit' && pendingAttachmentCount > 0) {
+    return {
+      canSend: false,
+      disabledReason: 'Save the edit before adding attachments.',
+      mode,
+      pendingAttachmentCount,
+      placeholder,
+    }
+  }
+
+  if (!content.trim() && pendingAttachmentCount === 0) {
     return {
       canSend: false,
       disabledReason: 'Write a message before sending.',
       mode,
+      pendingAttachmentCount,
       placeholder,
     }
   }
@@ -1043,6 +1137,7 @@ export function mobileComposerState(
     canSend: true,
     disabledReason: null,
     mode,
+    pendingAttachmentCount,
     placeholder,
   }
 }
@@ -1288,18 +1383,26 @@ function messageFromRealtimeEnvelope(envelope: RealtimeIncomingEnvelope): Mobile
   const message = objectValue(data.message)
   const channelId = stringValue(message.channel_id) ?? envelope.scope.channel_id
   const content = textValue(message.content)
+  const attachments = mobileMessageAttachmentsValue(message.attachments)
+  const components = mobileMessageComponentsValue(message.components)
   const embeds = richEmbedsValue(message.embeds)
-  if (!channelId || (!content && embeds.length === 0)) {
+  if (!channelId || (!content && attachments.length === 0 && components.length === 0 && embeds.length === 0)) {
     return null
   }
+  const webhookUsername = stringValue(message.webhook_username)
+  const authorKind =
+    mobileMessageAuthorKindValue(message.author_kind) ??
+    (webhookUsername ? 'webhook' : components.length > 0 ? 'bot' : 'user')
 
   return {
     id: stringValue(message.id) ?? envelope.id,
     channelId,
-    authorName:
-      stringValue(message.author_display_name) ??
-      stringValue(message.author_user_id) ??
-      'Unknown user',
+    authorName: webhookUsername ?? stringValue(message.author_display_name) ?? stringValue(message.author_user_id) ?? 'Unknown user',
+    authorKind,
+    authorBadge: mobileAuthorBadge(authorKind),
+    avatarUrl: stringValue(message.webhook_avatar_url),
+    attachments,
+    components,
     content,
     embeds,
     time: timeLabel(envelope.occurred_at),
@@ -1412,6 +1515,79 @@ function applyMobileReaction(
         }
       : reaction,
   )
+}
+
+function mobileMessageAttachmentsValue(value: unknown): MobileMessageAttachment[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value.flatMap((candidate) => {
+    const attachment = objectValue(candidate)
+    const id = stringValue(attachment.id)
+    const fileName = stringValue(attachment.file_name)
+    if (!id || !fileName) {
+      return []
+    }
+
+    return [
+      {
+        id,
+        fileName,
+        contentType: stringValue(attachment.content_type) ?? 'application/octet-stream',
+        sizeBytes: numberValue(attachment.size_bytes) ?? 0,
+        status: stringValue(attachment.status) ?? 'linked',
+        downloadUrl: stringValue(attachment.download_url) ?? '',
+      },
+    ]
+  })
+}
+
+function mobileMessageComponentsValue(value: unknown): MobileMessageComponent[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value.flatMap((candidate, rowIndex) => {
+    const row = objectValue(candidate)
+    const rowComponents = Array.isArray(row.components) ? row.components : [candidate]
+
+    return rowComponents.flatMap((component, componentIndex) => {
+      const item = objectValue(component)
+      const label = stringValue(item.label)
+      const customId = stringValue(item.custom_id)
+      if (!label) {
+        return []
+      }
+
+      return [
+        {
+          id: customId ?? `component-${rowIndex}-${componentIndex}`,
+          label,
+          disabled: booleanValue(item.disabled) ?? false,
+        },
+      ]
+    })
+  })
+}
+
+function mobileMessageAuthorKindValue(value: unknown): MobileMessageAuthorKind | undefined {
+  return value === 'user' || value === 'bot' || value === 'webhook' || value === 'system'
+    ? value
+    : undefined
+}
+
+function mobileAuthorBadge(authorKind: MobileMessageAuthorKind) {
+  switch (authorKind) {
+    case 'bot':
+      return 'BOT'
+    case 'webhook':
+      return 'WEBHOOK'
+    case 'system':
+      return 'SYSTEM'
+    case 'user':
+      return undefined
+  }
 }
 
 function objectValue(value: unknown): Record<string, unknown> {

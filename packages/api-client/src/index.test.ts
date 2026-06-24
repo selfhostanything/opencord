@@ -458,6 +458,41 @@ describe('OpenCord API client', () => {
     })
   })
 
+  it('can refresh a browser cookie backed session with credentials included', async () => {
+    const fetchMock = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>().mockResolvedValue(
+      jsonResponse({
+        user: {
+          id: '01973f83-f22a-73ba-ae76-5a045c52fc90',
+          email: 'alpha@example.com',
+          display_name: 'Alpha User',
+        },
+        session: {
+          token: 'rotated-session-token',
+          refresh_token: 'rotated-refresh-token',
+        },
+      }),
+    )
+    const client = createOpenCordApiClient({
+      baseUrl: 'https://chat.example.com',
+      credentials: 'include',
+      fetch: fetchMock,
+    })
+
+    await expect(client.refreshSession()).resolves.toMatchObject({
+      session: {
+        token: 'rotated-session-token',
+        refreshToken: 'rotated-refresh-token',
+      },
+    })
+    expect(fetchMock).toHaveBeenCalledWith('https://chat.example.com/auth/refresh', {
+      credentials: 'include',
+      headers: {
+        Accept: 'application/json',
+      },
+      method: 'POST',
+    })
+  })
+
   it('preserves rich message fields from the server payload', async () => {
     const fetchMock = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>()
     fetchMock.mockResolvedValue(

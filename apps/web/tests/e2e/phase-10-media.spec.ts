@@ -96,6 +96,7 @@ type MediaUser = {
   email: string
   displayName: string
   password: string
+  refreshToken: string
   sessionToken: string
   userId: string
   headers: { Authorization: string }
@@ -2657,6 +2658,17 @@ async function seedLocalAlphaSession(
   user: MediaUser,
   reconnectVoiceChannelId: string | null,
 ) {
+  await page.context().addCookies([
+    {
+      httpOnly: true,
+      name: 'opencord_refresh',
+      path: '/auth',
+      sameSite: 'Lax',
+      secure: API_BASE_URL.startsWith('https://'),
+      url: API_BASE_URL,
+      value: user.refreshToken,
+    },
+  ])
   await page.evaluate(
     ({ apiBaseUrl, reconnectChannelId, seededUser }) => {
       const baseUrl = new URL(apiBaseUrl).toString().replace(/\/+$/, '')
@@ -2690,7 +2702,6 @@ async function seedLocalAlphaSession(
             name: 'Phase 10 Local Alpha Restore',
           },
           reconnectVoiceChannelId: reconnectChannelId,
-          sessionToken: seededUser.sessionToken,
           user: {
             displayName: seededUser.displayName,
             email: seededUser.email,
@@ -2705,7 +2716,6 @@ async function seedLocalAlphaSession(
       seededUser: {
         displayName: user.displayName,
         email: user.email,
-        sessionToken: user.sessionToken,
         userId: user.userId,
       },
     },
@@ -3190,6 +3200,7 @@ async function loginUser(
     email,
     headers: { Authorization: `Bearer ${body.session.token as string}` },
     password,
+    refreshToken: body.session.refresh_token as string,
     sessionToken: body.session.token as string,
     userId: body.user.id as string,
   }
@@ -3212,6 +3223,7 @@ async function registerUser(
   return {
     ...user,
     headers: { Authorization: `Bearer ${body.session.token as string}` },
+    refreshToken: body.session.refresh_token as string,
     sessionToken: body.session.token as string,
     userId: body.user.id as string,
   }

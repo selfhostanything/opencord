@@ -28,12 +28,16 @@ import {
 } from '@opencord/realtime'
 import {
   activeServerConnection,
+  clearActiveDeviceSession,
   createDefaultServerConnectionState,
+  loadActiveDeviceSession,
   loadServerConnectionState,
+  persistDeviceSession,
   removeServerConnection,
   saveServerConnectionState,
   switchServerConnection,
   upsertServerConnection,
+  type DeviceSessionStores,
   type ServerConnection,
 } from '@opencord/server-connections'
 
@@ -144,7 +148,6 @@ type LocalAlphaSessionSnapshot = {
   baseUrl: string
   email: string
   displayName: string
-  sessionToken: string
   user: AuthUser
   organization: Organization
   reconnectVoiceChannelId: string | null
@@ -225,6 +228,11 @@ type MeetingRoomState = {
 }
 
 type OpenCordDesktopRuntime = {
+  deviceSessions?: {
+    getSecret(key: string): Promise<string | null>
+    removeSecret(key: string): Promise<boolean>
+    setSecret(key: string, value: string): Promise<boolean>
+  }
   platform: string
   versions?: {
     chrome?: string
@@ -583,13 +591,17 @@ export function WorkspaceShell({
     setLocalAlphaStatus('loading')
     setLocalAlphaError(null)
     try {
-      const anonymousClient = createOpenCordApiClient({ baseUrl: activeConnection.baseUrl })
+      const anonymousClient = createOpenCordApiClient({
+        baseUrl: activeConnection.baseUrl,
+        credentials: 'include',
+      })
       const authResult = await registerOrLoginLocalAlpha(
         anonymousClient,
         email,
         displayName,
         password,
       )
+      await persistLocalAlphaDeviceSession(activeConnection.baseUrl, authResult)
       const client = createOpenCordApiClient({
         baseUrl: activeConnection.baseUrl,
         sessionToken: authResult.session.token,
@@ -615,23 +627,68 @@ export function WorkspaceShell({
     setLocalAlphaDisplayName(snapshot.displayName)
 
     try {
+      const authResult = await refreshLocalAlphaDeviceSession(snapshot.baseUrl)
+      await persistLocalAlphaDeviceSession(snapshot.baseUrl, authResult)
       const client = createOpenCordApiClient({
-        baseUrl: activeConnection.baseUrl,
-        sessionToken: snapshot.sessionToken,
+        baseUrl: snapshot.baseUrl,
+        sessionToken: authResult.session.token,
       })
       await loadLocalAlphaWorkspace({
         client,
-        displayName: snapshot.displayName,
-        email: snapshot.email,
+        displayName: authResult.user.displayName,
+        email: authResult.user.email,
         reconnectVoiceChannelId: snapshot.reconnectVoiceChannelId,
-        sessionToken: snapshot.sessionToken,
-        user: snapshot.user,
+        sessionToken: authResult.session.token,
+        user: authResult.user,
       })
     } catch (error) {
       clearLocalAlphaSession()
+      void clearLocalAlphaDeviceSession(snapshot.baseUrl)
       setLocalAlphaStatus('idle')
       setLocalAlphaError(null)
     }
+  }
+
+  async function refreshLocalAlphaDeviceSession(baseUrl: string) {
+    const desktopStores = desktopDeviceSessionStores()
+    const storedSession = desktopStores
+      ? await loadActiveDeviceSession(desktopStores, baseUrl)
+      : null
+    const client = createOpenCordApiClient({
+      baseUrl,
+      credentials: 'include',
+    })
+
+    return storedSession
+      ? client.refreshSession({ refreshToken: storedSession.refreshToken })
+      : client.refreshSession()
+  }
+
+  async function persistLocalAlphaDeviceSession(
+    baseUrl: string,
+    authResult: Awaited<ReturnType<ReturnType<typeof createOpenCordApiClient>['login']>>,
+  ) {
+    const desktopStores = desktopDeviceSessionStores()
+    if (!desktopStores || !authResult.session.refreshToken) {
+      return
+    }
+
+    await persistDeviceSession(desktopStores, {
+      accountEmail: authResult.user.email,
+      displayName: authResult.user.displayName,
+      refreshToken: authResult.session.refreshToken,
+      serverUrl: baseUrl,
+      userId: authResult.user.id,
+    })
+  }
+
+  async function clearLocalAlphaDeviceSession(baseUrl: string) {
+    const desktopStores = desktopDeviceSessionStores()
+    if (!desktopStores) {
+      return
+    }
+
+    await clearActiveDeviceSession(desktopStores, baseUrl)
   }
 
   async function loadLocalAlphaWorkspace({
@@ -672,7 +729,6 @@ export function WorkspaceShell({
       email,
       organization: workspace.organization,
       reconnectVoiceChannelId,
-      sessionToken,
       user,
     })
 
@@ -707,7 +763,6 @@ export function WorkspaceShell({
       email: localAlphaUser.email,
       organization: localAlphaOrganization,
       reconnectVoiceChannelId,
-      sessionToken: localAlphaSessionToken,
       user: localAlphaUser,
     })
   }
@@ -3965,6 +4020,27 @@ function saveBrowserServerConnectionState(
   saveServerConnectionState(window.localStorage, state)
 }
 
+function desktopDeviceSessionStores(): DeviceSessionStores | null {
+  if (typeof window === 'undefined' || !window.openCordDesktop?.deviceSessions) {
+    return null
+  }
+
+  const bridge = window.openCordDesktop.deviceSessions
+
+  return {
+    metadata: {
+      getItem: (key) => window.localStorage.getItem(key),
+      removeItem: (key) => window.localStorage.removeItem(key),
+      setItem: (key, value) => window.localStorage.setItem(key, value),
+    },
+    secrets: {
+      getItem: (key) => bridge.getSecret(key),
+      removeItem: (key) => bridge.removeSecret(key).then(() => undefined),
+      setItem: (key, value) => bridge.setSecret(key, value).then(() => undefined),
+    },
+  }
+}
+
 function loadLocalAlphaSession(): LocalAlphaSessionSnapshot | null {
   if (typeof window === 'undefined') {
     return null
@@ -3981,7 +4057,6 @@ function loadLocalAlphaSession(): LocalAlphaSessionSnapshot | null {
       typeof snapshot.baseUrl !== 'string' ||
       typeof snapshot.email !== 'string' ||
       typeof snapshot.displayName !== 'string' ||
-      typeof snapshot.sessionToken !== 'string' ||
       typeof snapshot.user?.id !== 'string' ||
       typeof snapshot.user.email !== 'string' ||
       typeof snapshot.user.displayName !== 'string' ||
@@ -4001,7 +4076,6 @@ function loadLocalAlphaSession(): LocalAlphaSessionSnapshot | null {
         typeof snapshot.reconnectVoiceChannelId === 'string'
           ? snapshot.reconnectVoiceChannelId
           : null,
-      sessionToken: snapshot.sessionToken,
       user: snapshot.user,
     }
   } catch {

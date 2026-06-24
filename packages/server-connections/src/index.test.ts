@@ -4,8 +4,12 @@ import {
   OPENCORD_SERVER_CONNECTIONS_STORAGE_KEY,
   activeServerConnection,
   createDefaultServerConnectionState,
+  createMemoryDeviceSessionStores,
   createMemoryServerConnectionStorage,
+  clearActiveDeviceSession,
+  loadActiveDeviceSession,
   loadServerConnectionState,
+  persistDeviceSession,
   removeServerConnection,
   saveServerConnectionState,
   serverConnectionCacheNamespace,
@@ -150,5 +154,32 @@ describe('server connection manager', () => {
 
     storage.setItem(OPENCORD_SERVER_CONNECTIONS_STORAGE_KEY, 'not json')
     expect(loadServerConnectionState(storage).connections).toHaveLength(1)
+  })
+
+  it('keeps persistent device refresh tokens out of normal metadata storage', async () => {
+    const stores = createMemoryDeviceSessionStores()
+
+    await persistDeviceSession(stores, {
+      accountEmail: 'Alpha@Example.com',
+      displayName: 'Alpha User',
+      refreshToken: 'refresh-token-secret',
+      serverUrl: ' https://chat.company.com/ ',
+      userId: 'user-alpha',
+    })
+
+    expect(JSON.stringify(stores.metadataSnapshot())).not.toContain('refresh-token-secret')
+    expect(JSON.stringify(stores.secretSnapshot())).toContain('refresh-token-secret')
+
+    const restored = await loadActiveDeviceSession(stores, 'https://chat.company.com')
+    expect(restored).toMatchObject({
+      accountEmail: 'alpha@example.com',
+      displayName: 'Alpha User',
+      refreshToken: 'refresh-token-secret',
+      serverUrl: 'https://chat.company.com',
+      userId: 'user-alpha',
+    })
+
+    await clearActiveDeviceSession(stores, 'https://chat.company.com/')
+    expect(await loadActiveDeviceSession(stores, 'https://chat.company.com')).toBeNull()
   })
 })

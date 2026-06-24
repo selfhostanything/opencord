@@ -1,4 +1,7 @@
 export const OPENCORD_SERVER_CONNECTIONS_STORAGE_KEY = 'opencord.serverConnections:v1'
+export const OPENCORD_DEVICE_SESSION_ACTIVE_KEY_PREFIX = 'opencord.deviceSession.active:v1'
+export const OPENCORD_DEVICE_SESSION_METADATA_KEY_PREFIX = 'opencord.deviceSession.metadata:v1'
+export const OPENCORD_DEVICE_SESSION_SECRET_KEY_PREFIX = 'opencord.deviceSession.secret:v1'
 
 export type ServerConnection = {
   id: string
@@ -38,6 +41,40 @@ export type ServerConnectionStorage = {
   removeItem(key: string): void
 }
 
+export type DeviceSessionMetadata = {
+  version: 1
+  serverUrl: string
+  accountEmail: string
+  displayName: string
+  userId: string
+  createdAt: string
+  updatedAt: string
+}
+
+export type DeviceSession = DeviceSessionMetadata & {
+  refreshToken: string
+}
+
+export type PersistDeviceSessionInput = {
+  serverUrl: string
+  accountEmail: string
+  displayName: string
+  userId: string
+  refreshToken: string
+  now?: string
+}
+
+export type DeviceSessionStore = {
+  getItem(key: string): string | null | Promise<string | null>
+  setItem(key: string, value: string): void | Promise<void>
+  removeItem(key: string): void | Promise<void>
+}
+
+export type DeviceSessionStores = {
+  metadata: DeviceSessionStore
+  secrets: DeviceSessionStore
+}
+
 type PersistedServerConnection = {
   id?: unknown
   displayName?: unknown
@@ -52,6 +89,16 @@ type PersistedServerConnectionState = {
   version?: unknown
   activeConnectionId?: unknown
   connections?: unknown
+}
+
+type PersistedDeviceSessionMetadata = {
+  version?: unknown
+  serverUrl?: unknown
+  accountEmail?: unknown
+  displayName?: unknown
+  userId?: unknown
+  createdAt?: unknown
+  updatedAt?: unknown
 }
 
 const DEFAULT_CONNECTION_TIME = '1970-01-01T00:00:00.000Z'
@@ -185,6 +232,79 @@ export function createMemoryServerConnectionStorage(): ServerConnectionStorage {
   }
 }
 
+export async function persistDeviceSession(
+  stores: DeviceSessionStores,
+  input: PersistDeviceSessionInput,
+) {
+  const now = input.now ?? new Date().toISOString()
+  const serverUrl = normalizeServerBaseUrl(input.serverUrl)
+  const accountEmail = normalizeAccountEmail(input.accountEmail)
+  const key = deviceSessionKey(serverUrl, accountEmail)
+  const existing = await loadDeviceSessionMetadata(stores.metadata, key)
+  const metadata: DeviceSessionMetadata = {
+    version: 1,
+    serverUrl,
+    accountEmail,
+    displayName: normalizeDisplayName(input.displayName, serverUrl),
+    userId: input.userId,
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now,
+  }
+
+  await stores.secrets.setItem(deviceSessionSecretStorageKey(key), input.refreshToken)
+  await stores.metadata.setItem(deviceSessionMetadataStorageKey(key), JSON.stringify(metadata))
+  await stores.metadata.setItem(activeDeviceSessionStorageKey(serverUrl), key)
+}
+
+export async function loadActiveDeviceSession(
+  stores: DeviceSessionStores,
+  serverUrl: string,
+): Promise<DeviceSession | null> {
+  const normalizedServerUrl = normalizeServerBaseUrl(serverUrl)
+  const key = await stores.metadata.getItem(activeDeviceSessionStorageKey(normalizedServerUrl))
+  if (!key) {
+    return null
+  }
+
+  const metadata = await loadDeviceSessionMetadata(stores.metadata, key)
+  if (!metadata || metadata.serverUrl !== normalizedServerUrl) {
+    return null
+  }
+
+  const refreshToken = await stores.secrets.getItem(deviceSessionSecretStorageKey(key))
+  if (!refreshToken) {
+    return null
+  }
+
+  return {
+    ...metadata,
+    refreshToken,
+  }
+}
+
+export async function clearActiveDeviceSession(stores: DeviceSessionStores, serverUrl: string) {
+  const normalizedServerUrl = normalizeServerBaseUrl(serverUrl)
+  const activeKey = activeDeviceSessionStorageKey(normalizedServerUrl)
+  const key = await stores.metadata.getItem(activeKey)
+  if (key) {
+    await stores.metadata.removeItem(deviceSessionMetadataStorageKey(key))
+    await stores.secrets.removeItem(deviceSessionSecretStorageKey(key))
+  }
+  await stores.metadata.removeItem(activeKey)
+}
+
+export function createMemoryDeviceSessionStores() {
+  const metadata = createAsyncMemoryStore()
+  const secrets = createAsyncMemoryStore()
+
+  return {
+    metadata,
+    secrets,
+    metadataSnapshot: metadata.snapshot,
+    secretSnapshot: secrets.snapshot,
+  }
+}
+
 export function serverConnectionCacheNamespace(connection: Pick<ServerConnection, 'id'>) {
   return `server:${connection.id}`
 }
@@ -268,6 +388,15 @@ function normalizeServerBaseUrl(value: string) {
   return url.toString().replace(/\/+$/, '')
 }
 
+function normalizeAccountEmail(value: string) {
+  const email = value.trim().toLowerCase()
+  if (!email) {
+    throw new TypeError('OpenCord account email is required')
+  }
+
+  return email
+}
+
 function normalizeDisplayName(value: string | undefined, baseUrl: string) {
   const displayName = value?.trim()
   if (displayName) {
@@ -300,6 +429,86 @@ function serverConnectionId(baseUrl: string) {
   }
 
   return `srv_${(hash >>> 0).toString(36)}`
+}
+
+function deviceSessionKey(serverUrl: string, accountEmail: string) {
+  return `${serverConnectionId(serverUrl)}:${accountEmail}`
+}
+
+function activeDeviceSessionStorageKey(serverUrl: string) {
+  return `${OPENCORD_DEVICE_SESSION_ACTIVE_KEY_PREFIX}:${serverConnectionId(serverUrl)}`
+}
+
+function deviceSessionMetadataStorageKey(key: string) {
+  return `${OPENCORD_DEVICE_SESSION_METADATA_KEY_PREFIX}:${key}`
+}
+
+function deviceSessionSecretStorageKey(key: string) {
+  return `${OPENCORD_DEVICE_SESSION_SECRET_KEY_PREFIX}:${key}`
+}
+
+async function loadDeviceSessionMetadata(
+  storage: DeviceSessionStore,
+  key: string,
+): Promise<DeviceSessionMetadata | null> {
+  try {
+    const raw = await storage.getItem(deviceSessionMetadataStorageKey(key))
+    if (!raw) {
+      return null
+    }
+
+    return parseDeviceSessionMetadata(JSON.parse(raw))
+  } catch {
+    return null
+  }
+}
+
+function parseDeviceSessionMetadata(value: unknown): DeviceSessionMetadata | null {
+  const payload = objectValue(value) as PersistedDeviceSessionMetadata
+  if (
+    payload.version !== 1 ||
+    typeof payload.serverUrl !== 'string' ||
+    typeof payload.accountEmail !== 'string' ||
+    typeof payload.displayName !== 'string' ||
+    typeof payload.userId !== 'string' ||
+    typeof payload.createdAt !== 'string' ||
+    typeof payload.updatedAt !== 'string'
+  ) {
+    return null
+  }
+
+  try {
+    return {
+      version: 1,
+      serverUrl: normalizeServerBaseUrl(payload.serverUrl),
+      accountEmail: normalizeAccountEmail(payload.accountEmail),
+      displayName: normalizeDisplayName(payload.displayName, payload.serverUrl),
+      userId: payload.userId,
+      createdAt: payload.createdAt,
+      updatedAt: payload.updatedAt,
+    }
+  } catch {
+    return null
+  }
+}
+
+function createAsyncMemoryStore() {
+  const values = new Map<string, string>()
+
+  return {
+    async getItem(key: string) {
+      return values.get(key) ?? null
+    },
+    async setItem(key: string, value: string) {
+      values.set(key, value)
+    },
+    async removeItem(key: string) {
+      values.delete(key)
+    },
+    snapshot() {
+      return Object.fromEntries(values)
+    },
+  }
 }
 
 function objectValue(value: unknown) {

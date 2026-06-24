@@ -18,6 +18,7 @@ import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-cont
 import {
   createOpenCordApiClient,
   OpenCordApiError,
+  type AuthResult,
   type Channel,
 } from '@opencord/api-client'
 import {
@@ -25,7 +26,12 @@ import {
   createOpenCordRealtimeClient,
   type RealtimeIncomingEnvelope,
 } from '@opencord/realtime'
-import type { ServerConnection } from '@opencord/server-connections'
+import {
+  clearActiveDeviceSession,
+  loadActiveDeviceSession,
+  persistDeviceSession,
+  type ServerConnection,
+} from '@opencord/server-connections'
 
 import {
   activeMobileServerConnection,
@@ -60,6 +66,7 @@ import {
   useMobileSessionStore,
   useMobileSettingsStore,
 } from './src/mobileStores'
+import { createMobileDeviceSessionStores } from './src/mobileDeviceSessionStorage'
 import {
   mobileE2ECommandFromUrl,
   mobileE2EStateUrl,
@@ -113,6 +120,8 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
   const e2eAutoJoinMeetingStartedRef = useRef(false)
   const e2eCommandPollInFlightRef = useRef(false)
   const e2eLoginStartedRef = useRef(false)
+  const restoreAttemptedServerUrlsRef = useRef(new Set<string>())
+  const mobileDeviceSessionStoresRef = useRef(createMobileDeviceSessionStores())
   const lastE2EStateSignatureRef = useRef<string | null>(null)
   const lastE2ECommandIdRef = useRef<string | null>(null)
   const voiceSessionRef = useRef<NativeLiveKitVoiceSession | null>(null)
@@ -449,6 +458,20 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
     }
   }, [])
 
+  useEffect(() => {
+    if (e2eLaunchConfig || state.screen !== 'login' || loginStatus === 'loading') {
+      return
+    }
+
+    const targetServerUrl = state.serverUrl
+    if (restoreAttemptedServerUrlsRef.current.has(targetServerUrl)) {
+      return
+    }
+
+    restoreAttemptedServerUrlsRef.current.add(targetServerUrl)
+    void restoreMobileDeviceSession(targetServerUrl)
+  }, [e2eLaunchConfig, loginStatus, state.screen, state.serverUrl])
+
   async function refreshNativePermissions() {
     const permissions = await queryNativeMediaPermissions()
     Object.entries(permissions).forEach(([kind, status]) => {
@@ -477,6 +500,7 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
     try {
       const authClient = createOpenCordApiClient({ baseUrl: loginServerUrl })
       const authResult = await authClient.login({ email: loginEmail, password: loginPassword })
+      await persistMobileDeviceSession(loginServerUrl, authResult)
       const client = createOpenCordApiClient({
         baseUrl: loginServerUrl,
         sessionToken: authResult.session.token,
@@ -490,11 +514,69 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
         sessionToken: authResult.session.token,
         channels: mobileChannelsFromApiChannels(channels),
       })
+      setPassword('')
     } catch (error) {
       setLoginError(errorMessage(error, 'Unable to log in.'))
     } finally {
       setLoginStatus('idle')
     }
+  }
+
+  async function restoreMobileDeviceSession(targetServerUrl: string) {
+    const storedSession = await loadActiveDeviceSession(
+      mobileDeviceSessionStoresRef.current,
+      targetServerUrl,
+    )
+    if (!storedSession) {
+      return
+    }
+
+    setLoginStatus('loading')
+    setLoginError(null)
+    setServerUrl(storedSession.serverUrl)
+    setEmail(storedSession.accountEmail)
+    try {
+      const authClient = createOpenCordApiClient({ baseUrl: storedSession.serverUrl })
+      const authResult = await authClient.refreshSession({
+        refreshToken: storedSession.refreshToken,
+      })
+      await persistMobileDeviceSession(storedSession.serverUrl, authResult)
+      const client = createOpenCordApiClient({
+        baseUrl: storedSession.serverUrl,
+        sessionToken: authResult.session.token,
+      })
+      const channels = await ensureMobileWorkspaceChannels(client, authResult.user.email)
+      dispatch({
+        type: 'login.succeeded',
+        serverUrl: storedSession.serverUrl,
+        email: authResult.user.email,
+        displayName: authResult.user.displayName,
+        sessionToken: authResult.session.token,
+        channels: mobileChannelsFromApiChannels(channels),
+      })
+    } catch (error) {
+      await clearActiveDeviceSession(mobileDeviceSessionStoresRef.current, storedSession.serverUrl)
+      setLoginError(errorMessage(error, 'Saved login expired. Please log in again.'))
+    } finally {
+      setLoginStatus('idle')
+    }
+  }
+
+  async function persistMobileDeviceSession(
+    serverUrl: string,
+    authResult: AuthResult,
+  ) {
+    if (!authResult.session.refreshToken) {
+      return
+    }
+
+    await persistDeviceSession(mobileDeviceSessionStoresRef.current, {
+      accountEmail: authResult.user.email,
+      displayName: authResult.user.displayName,
+      refreshToken: authResult.session.refreshToken,
+      serverUrl,
+      userId: authResult.user.id,
+    })
   }
 
   function switchServer(connectionId: string) {

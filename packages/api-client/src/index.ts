@@ -407,6 +407,7 @@ export type IncomingWebhookWithToken = IncomingWebhook & {
 
 export type OpenCordApiClientOptions = {
   baseUrl?: string
+  credentials?: RequestCredentials
   fetch?: OpenCordFetch
   sessionToken?: string
 }
@@ -782,11 +783,13 @@ export class OpenCordApiError extends Error {
 export class OpenCordApiClient {
   readonly baseUrl: string
 
+  private readonly credentials?: RequestCredentials
   private readonly fetchImpl: OpenCordFetch
   private readonly sessionToken?: string
 
   constructor(options: OpenCordApiClientOptions = {}) {
     this.baseUrl = normalizeOpenCordBaseUrl(options.baseUrl)
+    this.credentials = options.credentials
     this.fetchImpl = options.fetch ?? defaultFetch
     this.sessionToken = normalizeSessionToken(options.sessionToken)
   }
@@ -905,12 +908,18 @@ export class OpenCordApiClient {
     return authResultFromPayload(payload)
   }
 
-  async refreshSession(request: RefreshSessionRequest): Promise<AuthResult> {
-    const payload = await this.requestJson<AuthResultPayload>('/auth/refresh', {
-      body: JSON.stringify({
-        refresh_token: request.refreshToken,
-      }),
+  async refreshSession(request?: RefreshSessionRequest): Promise<AuthResult> {
+    const init: RequestInit = {
       method: 'POST',
+    }
+    if (request) {
+      init.body = JSON.stringify({
+        refresh_token: request.refreshToken,
+      })
+    }
+
+    const payload = await this.requestJson<AuthResultPayload>('/auth/refresh', {
+      ...init,
     })
 
     return authResultFromPayload(payload)
@@ -1285,10 +1294,15 @@ export class OpenCordApiClient {
   }
 
   private async requestJson<T>(path: string, init: RequestInit = {}): Promise<T> {
-    const response = await this.fetchImpl(this.endpoint(path), {
+    const requestInit: RequestInit = {
       ...init,
       headers: this.requestHeaders(init),
-    })
+    }
+    if (this.credentials && requestInit.credentials === undefined) {
+      requestInit.credentials = this.credentials
+    }
+
+    const response = await this.fetchImpl(this.endpoint(path), requestInit)
     const payload = await parseJson(response)
 
     if (!response.ok) {

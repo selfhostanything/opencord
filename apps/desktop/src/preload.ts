@@ -1,6 +1,12 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
 import {
+  DEVICE_SESSION_SECRET_GET_CHANNEL,
+  DEVICE_SESSION_SECRET_REMOVE_CHANNEL,
+  DEVICE_SESSION_SECRET_SET_CHANNEL,
+  isDeviceSessionSecretKey,
+} from './deviceSessionSecretBridge'
+import {
   DEEP_LINK_ROUTE_CHANNEL,
   isDesktopDeepLinkRoute,
   type DesktopDeepLinkRoute,
@@ -29,6 +35,29 @@ contextBridge.exposeInMainWorld('openCordDesktop', {
       }
 
       return ipcRenderer.invoke(MESSAGE_NOTIFICATION_CHANNEL, payload) as Promise<boolean>
+    },
+  },
+  deviceSessions: {
+    getSecret(key: string) {
+      if (!isDeviceSessionSecretKey(key)) {
+        return Promise.resolve(null)
+      }
+
+      return ipcRenderer.invoke(DEVICE_SESSION_SECRET_GET_CHANNEL, key) as Promise<string | null>
+    },
+    removeSecret(key: string) {
+      if (!isDeviceSessionSecretKey(key)) {
+        return Promise.resolve(false)
+      }
+
+      return ipcRenderer.invoke(DEVICE_SESSION_SECRET_REMOVE_CHANNEL, key) as Promise<boolean>
+    },
+    setSecret(key: string, value: string) {
+      if (!isDeviceSessionSecretKey(key) || typeof value !== 'string') {
+        return Promise.resolve(false)
+      }
+
+      return ipcRenderer.invoke(DEVICE_SESSION_SECRET_SET_CHANNEL, key, value) as Promise<boolean>
     },
   },
   deepLinks: {

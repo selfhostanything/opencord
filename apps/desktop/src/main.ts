@@ -1,5 +1,14 @@
 import path from 'node:path'
-import { app, BrowserWindow, Notification, desktopCapturer, ipcMain, session, shell } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  Notification,
+  desktopCapturer,
+  ipcMain,
+  safeStorage,
+  session,
+  shell,
+} from 'electron'
 
 import {
   createMainWindowOptions,
@@ -14,6 +23,13 @@ import {
   type DesktopDeepLinkRoute,
 } from './deepLinks'
 import {
+  DEVICE_SESSION_SECRET_GET_CHANNEL,
+  DEVICE_SESSION_SECRET_REMOVE_CHANNEL,
+  DEVICE_SESSION_SECRET_SET_CHANNEL,
+  createDesktopDeviceSessionSecretStore,
+  isDeviceSessionSecretKey,
+} from './deviceSessionSecrets'
+import {
   MESSAGE_NOTIFICATION_CHANNEL,
   buildMessageNotification,
   isMessageNotificationPayload,
@@ -25,6 +41,10 @@ const repoRoot = path.resolve(appRoot, '../..')
 const preloadPath = path.join(__dirname, 'preload.js')
 const smokeMode = process.argv.includes('--smoke')
 const mediaAutomationConfig = desktopMediaAutomationConfig()
+const deviceSessionSecrets = createDesktopDeviceSessionSecretStore({
+  safeStorage,
+  userDataPath: app.getPath('userData'),
+})
 
 let mainWindow: BrowserWindow | null = null
 let pendingDeepLinkRoute: DesktopDeepLinkRoute | null = null
@@ -47,6 +67,32 @@ ipcMain.handle(MESSAGE_NOTIFICATION_CHANNEL, (_event, payload: unknown) => {
   }
 
   new Notification(buildMessageNotification(payload)).show()
+  return true
+})
+
+ipcMain.handle(DEVICE_SESSION_SECRET_GET_CHANNEL, (_event, key: unknown) => {
+  if (!isDeviceSessionSecretKey(key)) {
+    return null
+  }
+
+  return deviceSessionSecrets.getItem(key)
+})
+
+ipcMain.handle(DEVICE_SESSION_SECRET_SET_CHANNEL, async (_event, key: unknown, value: unknown) => {
+  if (!isDeviceSessionSecretKey(key) || typeof value !== 'string') {
+    return false
+  }
+
+  await deviceSessionSecrets.setItem(key, value)
+  return true
+})
+
+ipcMain.handle(DEVICE_SESSION_SECRET_REMOVE_CHANNEL, async (_event, key: unknown) => {
+  if (!isDeviceSessionSecretKey(key)) {
+    return false
+  }
+
+  await deviceSessionSecrets.removeItem(key)
   return true
 })
 

@@ -1294,6 +1294,8 @@ export function mobileChannelsFromApiChannels(channels: Channel[]): MobileChanne
     id: channel.id,
     kind: channel.kind,
     name: channel.name,
+    organizationId: channel.organizationId,
+    spaceId: channel.spaceId,
     topic: channel.topic ?? (channel.kind === 'voice' ? 'Voice channel' : ''),
     unread: false,
   }))

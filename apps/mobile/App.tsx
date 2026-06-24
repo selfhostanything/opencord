@@ -28,8 +28,12 @@ import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-cont
 import {
   createOpenCordApiClient,
   OpenCordApiError,
+  type AuditEvent,
   type AuthResult,
+  type BotApplicationDetail,
   type Channel,
+  type IncomingWebhook,
+  type IncomingWebhookWithToken,
   type Meeting,
   type MessageAttachment,
 } from '@opencord/api-client'
@@ -81,6 +85,7 @@ import {
 import {
   clearMobileRuntimeStores,
   useMobileChatStore,
+  useMobileDeveloperStore,
   useMobileMeetingsStore,
   useMobileSessionStore,
   useMobileSettingsStore,
@@ -172,6 +177,15 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
     (store) => store.setPendingAttachments,
   )
   const closeMobileMeetingForm = useMobileMeetingsStore((store) => store.closeForm)
+  const mobileAuditEventsBySpaceId = useMobileDeveloperStore(
+    (store) => store.auditEventsBySpaceId,
+  )
+  const mobileBotApplications = useMobileDeveloperStore(
+    (store) => store.botApplications,
+  )
+  const mobileWebhooksByChannelId = useMobileDeveloperStore(
+    (store) => store.webhooksByChannelId,
+  )
   const localMeetingReminders = useMobileMeetingsStore(
     (store) => store.localRemindersByMeetingId,
   )
@@ -187,6 +201,22 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
     (store) => store.setLocalReminder,
   )
   const upsertMobileMeeting = useMobileMeetingsStore((store) => store.upsertMeeting)
+  const removeMobileIncomingWebhook = useMobileDeveloperStore(
+    (store) => store.removeIncomingWebhook,
+  )
+  const setMobileAuditEvents = useMobileDeveloperStore((store) => store.setAuditEvents)
+  const setMobileBotApplications = useMobileDeveloperStore(
+    (store) => store.setBotApplications,
+  )
+  const setMobileIncomingWebhooks = useMobileDeveloperStore(
+    (store) => store.setIncomingWebhooks,
+  )
+  const upsertMobileBotApplication = useMobileDeveloperStore(
+    (store) => store.upsertBotApplication,
+  )
+  const upsertMobileIncomingWebhook = useMobileDeveloperStore(
+    (store) => store.upsertIncomingWebhook,
+  )
   const activeSettingsPanel = useMobileSettingsStore((store) => store.activePanel)
   const setMobileAccountMetadata = useMobileSessionStore((store) => store.setAccountMetadata)
   const setMobileRouteTarget = useMobileSessionStore((store) => store.setRouteTarget)
@@ -205,8 +235,29 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
   const [settingsFeedback, setSettingsFeedback] = useState<string | null>(null)
   const [logoutStatus, setLogoutStatus] = useState<'idle' | 'loading'>('idle')
   const [activeDeviceSessionSaved, setActiveDeviceSessionSaved] = useState(false)
+  const [developerStatus, setDeveloperStatus] = useState<'idle' | 'loading'>('idle')
+  const [developerFeedback, setDeveloperFeedback] = useState<string | null>(null)
+  const [developerBotName, setDeveloperBotName] = useState('Mobile Bot')
+  const [developerWebhookName, setDeveloperWebhookName] = useState('Mobile Hook')
   const activeChannel = selectedChannel(state)
   const activeServer = activeMobileServerConnection(state)
+  const developerOrganizationId =
+    activeChannel.organizationId ?? meetingOrganizationIdFromMobileChannels(state.channels)
+  const developerSpaceId =
+    activeChannel.spaceId ??
+    state.channels.find((channel) => channel.spaceId)?.spaceId ??
+    DEFAULT_MOBILE_SPACE_ID
+  const developerTextChannel =
+    activeChannel.kind === 'text'
+      ? activeChannel
+      : state.channels.find((channel) => channel.kind === 'text') ?? null
+  const developerChannelId = developerTextChannel?.id ?? null
+  const developerWebhooks = developerChannelId
+    ? mobileWebhooksByChannelId[developerChannelId] ?? []
+    : []
+  const developerAuditEvents = developerSpaceId
+    ? mobileAuditEventsBySpaceId[developerSpaceId] ?? []
+    : []
   const composerText = composerTextByChannelId[state.selectedChannelId] ?? ''
   const pendingAttachments = pendingAttachmentsByChannelId[state.selectedChannelId] ?? []
   const timelineGroups = useMemo(() => mobileMessageTimelineGroups(state), [state])
@@ -262,7 +313,10 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
     () => [styles.loginPanel, { paddingTop: Math.max(40, height * 0.1) }],
     [height],
   )
-  const permissionPanelMaxHeight = Math.min(560, Math.max(300, height * 0.58))
+  const permissionPanelMaxHeight = Math.min(
+    720,
+    Math.max(420, height - insets.top - insets.bottom - 168),
+  )
 
   useEffect(() => {
     setServerUrl(state.serverUrl)
@@ -826,6 +880,267 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
         logoutError ? `${logoutError} Local saved login was cleared.` : null,
       )
       setLogoutStatus('idle')
+    }
+  }
+
+  function mobileDeveloperApiContext(options: {
+    requireSpace?: boolean
+    requireTextChannel?: boolean
+  } = {}) {
+    if (!state.sessionToken) {
+      setDeveloperFeedback('Sign in to a server before using developer tools.')
+      return null
+    }
+    if (!developerOrganizationId || !isServerBackedId(developerOrganizationId)) {
+      setDeveloperFeedback('Developer tools need a server-backed organization.')
+      return null
+    }
+    if (
+      options.requireSpace &&
+      (!developerSpaceId || !isServerBackedId(developerSpaceId))
+    ) {
+      setDeveloperFeedback('This action needs a server-backed space.')
+      return null
+    }
+    if (
+      options.requireTextChannel &&
+      (!developerChannelId || !isServerBackedId(developerChannelId))
+    ) {
+      setDeveloperFeedback('Incoming webhooks need a server-backed text channel.')
+      return null
+    }
+
+    return {
+      channelId: developerChannelId,
+      client: createOpenCordApiClient({
+        baseUrl: state.serverUrl,
+        sessionToken: state.sessionToken,
+      }),
+      organizationId: developerOrganizationId,
+      spaceId: developerSpaceId,
+    }
+  }
+
+  async function loadMobileDeveloperBots() {
+    const context = mobileDeveloperApiContext()
+    if (!context) {
+      return
+    }
+
+    setDeveloperStatus('loading')
+    try {
+      const bots = await context.client.listBotApplications(context.organizationId)
+      setMobileBotApplications(bots)
+      setDeveloperFeedback(`Loaded ${bots.length} bot application${bots.length === 1 ? '' : 's'}.`)
+    } catch (error) {
+      setDeveloperFeedback(errorMessage(error, 'Unable to load bot applications.'))
+    } finally {
+      setDeveloperStatus('idle')
+    }
+  }
+
+  async function createMobileDeveloperBot() {
+    const context = mobileDeveloperApiContext()
+    if (!context) {
+      return
+    }
+
+    const name = developerBotName.trim()
+    if (!name) {
+      setDeveloperFeedback('Bot name is required.')
+      return
+    }
+
+    setDeveloperStatus('loading')
+    try {
+      const created = await context.client.createBotApplication(context.organizationId, {
+        description: 'Created from OpenCord mobile settings.',
+        name,
+      })
+      Clipboard.setString(created.botToken.token)
+      upsertMobileBotApplication({
+        activeTokenLastFour: created.botToken.tokenLastFour,
+        botApplication: created.botApplication,
+        spaceMemberships: [],
+      })
+      setDeveloperBotName('')
+      setDeveloperFeedback(
+        `Bot token copied. Last four: ${lastFourSecretLabel(created.botToken.tokenLastFour)}.`,
+      )
+    } catch (error) {
+      setDeveloperFeedback(errorMessage(error, 'Unable to create bot application.'))
+    } finally {
+      setDeveloperStatus('idle')
+    }
+  }
+
+  async function rotateMobileDeveloperBotToken(applicationId: string) {
+    const context = mobileDeveloperApiContext()
+    const bot = mobileBotApplications.find(
+      (candidate) => candidate.botApplication.id === applicationId,
+    )
+    if (!context || !bot) {
+      return
+    }
+
+    setDeveloperStatus('loading')
+    try {
+      const token = await context.client.rotateBotToken(context.organizationId, applicationId)
+      Clipboard.setString(token.token)
+      upsertMobileBotApplication({
+        ...bot,
+        activeTokenLastFour: token.tokenLastFour,
+      })
+      setDeveloperFeedback(
+        `${bot.botApplication.name} token copied. Last four: ${lastFourSecretLabel(
+          token.tokenLastFour,
+        )}.`,
+      )
+    } catch (error) {
+      setDeveloperFeedback(errorMessage(error, 'Unable to rotate bot token.'))
+    } finally {
+      setDeveloperStatus('idle')
+    }
+  }
+
+  async function inviteMobileDeveloperBot(applicationId: string) {
+    const context = mobileDeveloperApiContext({ requireSpace: true })
+    const bot = mobileBotApplications.find(
+      (candidate) => candidate.botApplication.id === applicationId,
+    )
+    if (!context || !bot) {
+      return
+    }
+
+    setDeveloperStatus('loading')
+    try {
+      const invite = await context.client.inviteBotApplicationToSpace(
+        context.organizationId,
+        applicationId,
+        context.spaceId,
+        { role: 'member' },
+      )
+      upsertMobileBotApplication({
+        ...bot,
+        botApplication: invite.botApplication,
+        spaceMemberships: [
+          ...bot.spaceMemberships.filter(
+            (membership) => membership.spaceId !== invite.member.spaceId,
+          ),
+          invite.member,
+        ],
+      })
+      setDeveloperFeedback(`${bot.botApplication.name} invited to this space.`)
+    } catch (error) {
+      setDeveloperFeedback(errorMessage(error, 'Unable to invite bot.'))
+    } finally {
+      setDeveloperStatus('idle')
+    }
+  }
+
+  async function loadMobileDeveloperWebhooks() {
+    const context = mobileDeveloperApiContext({ requireTextChannel: true })
+    if (!context || !context.channelId) {
+      return
+    }
+
+    setDeveloperStatus('loading')
+    try {
+      const webhooks = await context.client.listIncomingWebhooks(context.channelId)
+      setMobileIncomingWebhooks(context.channelId, webhooks)
+      setDeveloperFeedback(`Loaded ${webhooks.length} incoming webhook${webhooks.length === 1 ? '' : 's'}.`)
+    } catch (error) {
+      setDeveloperFeedback(errorMessage(error, 'Unable to load incoming webhooks.'))
+    } finally {
+      setDeveloperStatus('idle')
+    }
+  }
+
+  async function createMobileDeveloperWebhook() {
+    const context = mobileDeveloperApiContext({ requireTextChannel: true })
+    if (!context || !context.channelId) {
+      return
+    }
+
+    const name = developerWebhookName.trim()
+    if (!name) {
+      setDeveloperFeedback('Webhook name is required.')
+      return
+    }
+
+    setDeveloperStatus('loading')
+    try {
+      const created = await context.client.createIncomingWebhook(context.channelId, { name })
+      Clipboard.setString(created.executeUrl || created.token)
+      upsertMobileIncomingWebhook(context.channelId, incomingWebhookDetailFromShownToken(created))
+      setDeveloperWebhookName('')
+      setDeveloperFeedback(
+        `Webhook URL copied. Last four: ${lastFourSecretLabel(created.tokenLastFour)}.`,
+      )
+    } catch (error) {
+      setDeveloperFeedback(errorMessage(error, 'Unable to create incoming webhook.'))
+    } finally {
+      setDeveloperStatus('idle')
+    }
+  }
+
+  async function rotateMobileDeveloperWebhookToken(webhookId: string) {
+    const context = mobileDeveloperApiContext({ requireTextChannel: true })
+    if (!context || !context.channelId) {
+      return
+    }
+
+    setDeveloperStatus('loading')
+    try {
+      const rotated = await context.client.rotateIncomingWebhookToken(
+        context.channelId,
+        webhookId,
+      )
+      Clipboard.setString(rotated.executeUrl || rotated.token)
+      upsertMobileIncomingWebhook(context.channelId, incomingWebhookDetailFromShownToken(rotated))
+      setDeveloperFeedback(
+        `Webhook URL copied. Last four: ${lastFourSecretLabel(rotated.tokenLastFour)}.`,
+      )
+    } catch (error) {
+      setDeveloperFeedback(errorMessage(error, 'Unable to rotate webhook token.'))
+    } finally {
+      setDeveloperStatus('idle')
+    }
+  }
+
+  async function deleteMobileDeveloperWebhook(webhookId: string) {
+    const context = mobileDeveloperApiContext({ requireTextChannel: true })
+    if (!context || !context.channelId) {
+      return
+    }
+
+    setDeveloperStatus('loading')
+    try {
+      await context.client.deleteIncomingWebhook(context.channelId, webhookId)
+      removeMobileIncomingWebhook(context.channelId, webhookId)
+      setDeveloperFeedback('Incoming webhook deleted.')
+    } catch (error) {
+      setDeveloperFeedback(errorMessage(error, 'Unable to delete incoming webhook.'))
+    } finally {
+      setDeveloperStatus('idle')
+    }
+  }
+
+  async function loadMobileDeveloperAuditEvents() {
+    const context = mobileDeveloperApiContext({ requireSpace: true })
+    if (!context) {
+      return
+    }
+
+    setDeveloperStatus('loading')
+    try {
+      const auditEvents = await context.client.listSpaceAuditEvents(context.spaceId)
+      setMobileAuditEvents(context.spaceId, auditEvents)
+      setDeveloperFeedback(`Loaded ${auditEvents.length} audit event${auditEvents.length === 1 ? '' : 's'}.`)
+    } catch (error) {
+      setDeveloperFeedback(errorMessage(error, 'Unable to load audit events.'))
+    } finally {
+      setDeveloperStatus('idle')
     }
   }
 
@@ -1675,6 +1990,16 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
               <MobileSettingsPanel
                 accountName={state.account?.displayName ?? 'OpenCord'}
                 activePanel={activeSettingsPanel}
+                auditEvents={developerAuditEvents}
+                botApplications={mobileBotApplications}
+                developerBotName={developerBotName}
+                developerChannelId={developerChannelId}
+                developerChannelName={developerTextChannel?.name ?? 'No text channel'}
+                developerFeedback={developerFeedback}
+                developerOrganizationId={developerOrganizationId}
+                developerSpaceId={developerSpaceId}
+                developerStatus={developerStatus}
+                developerWebhookName={developerWebhookName}
                 email={state.account?.email ?? 'Not signed in'}
                 feedback={settingsFeedback}
                 hasSavedDeviceSession={activeDeviceSessionSaved}
@@ -1687,11 +2012,41 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
                 onLogout={() => {
                   void logoutMobileSession()
                 }}
+                onBotNameChange={setDeveloperBotName}
+                onCreateBot={() => {
+                  void createMobileDeveloperBot()
+                }}
+                onCreateWebhook={() => {
+                  void createMobileDeveloperWebhook()
+                }}
+                onDeleteWebhook={(webhookId) => {
+                  void deleteMobileDeveloperWebhook(webhookId)
+                }}
+                onInviteBot={(applicationId) => {
+                  void inviteMobileDeveloperBot(applicationId)
+                }}
+                onLoadAuditEvents={() => {
+                  void loadMobileDeveloperAuditEvents()
+                }}
+                onLoadBots={() => {
+                  void loadMobileDeveloperBots()
+                }}
+                onLoadWebhooks={() => {
+                  void loadMobileDeveloperWebhooks()
+                }}
                 onOpenSettings={openNativePermissionSettings}
                 onRequest={requestPermission}
+                onRotateBotToken={(applicationId) => {
+                  void rotateMobileDeveloperBotToken(applicationId)
+                }}
+                onRotateWebhookToken={(webhookId) => {
+                  void rotateMobileDeveloperWebhookToken(webhookId)
+                }}
                 onSelectPanel={openMobileSettingsPanel}
+                onWebhookNameChange={setDeveloperWebhookName}
                 rows={permissionRows}
                 serverUrl={state.serverUrl}
+                webhooks={developerWebhooks}
               />
             ) : null}
             {state.voice.errorMessage ? (
@@ -1807,6 +2162,16 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
         <MobileSettingsPanel
           accountName={state.account?.displayName ?? 'OpenCord'}
           activePanel={activeSettingsPanel}
+          auditEvents={developerAuditEvents}
+          botApplications={mobileBotApplications}
+          developerBotName={developerBotName}
+          developerChannelId={developerChannelId}
+          developerChannelName={developerTextChannel?.name ?? 'No text channel'}
+          developerFeedback={developerFeedback}
+          developerOrganizationId={developerOrganizationId}
+          developerSpaceId={developerSpaceId}
+          developerStatus={developerStatus}
+          developerWebhookName={developerWebhookName}
           email={state.account?.email ?? 'Not signed in'}
           feedback={settingsFeedback}
           hasSavedDeviceSession={activeDeviceSessionSaved}
@@ -1819,11 +2184,41 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
           onLogout={() => {
             void logoutMobileSession()
           }}
+          onBotNameChange={setDeveloperBotName}
+          onCreateBot={() => {
+            void createMobileDeveloperBot()
+          }}
+          onCreateWebhook={() => {
+            void createMobileDeveloperWebhook()
+          }}
+          onDeleteWebhook={(webhookId) => {
+            void deleteMobileDeveloperWebhook(webhookId)
+          }}
+          onInviteBot={(applicationId) => {
+            void inviteMobileDeveloperBot(applicationId)
+          }}
+          onLoadAuditEvents={() => {
+            void loadMobileDeveloperAuditEvents()
+          }}
+          onLoadBots={() => {
+            void loadMobileDeveloperBots()
+          }}
+          onLoadWebhooks={() => {
+            void loadMobileDeveloperWebhooks()
+          }}
           onOpenSettings={openNativePermissionSettings}
           onRequest={requestPermission}
+          onRotateBotToken={(applicationId) => {
+            void rotateMobileDeveloperBotToken(applicationId)
+          }}
+          onRotateWebhookToken={(webhookId) => {
+            void rotateMobileDeveloperWebhookToken(webhookId)
+          }}
           onSelectPanel={openMobileSettingsPanel}
+          onWebhookNameChange={setDeveloperWebhookName}
           rows={permissionRows}
           serverUrl={state.serverUrl}
+          webhooks={developerWebhooks}
         />
       ) : null}
       <FlatList
@@ -2491,40 +2886,85 @@ const mobileSettingsTabs: Array<{ panel: OpenCordSettingsPanel; label: string }>
   { panel: 'voice-video', label: 'Voice' },
   { panel: 'notifications', label: 'Notifications' },
   { panel: 'appearance', label: 'Appearance' },
+  { panel: 'developer', label: 'Developer' },
 ]
 
 function MobileSettingsPanel({
   accountName,
   activePanel,
+  auditEvents,
+  botApplications,
+  developerBotName,
+  developerChannelId,
+  developerChannelName,
+  developerFeedback,
+  developerOrganizationId,
+  developerSpaceId,
+  developerStatus,
+  developerWebhookName,
   email,
   feedback,
   hasSavedDeviceSession,
   logoutStatus,
   maxHeight,
+  onBotNameChange,
   onClearSavedLogin,
   onClose,
+  onCreateBot,
+  onCreateWebhook,
+  onDeleteWebhook,
+  onInviteBot,
+  onLoadAuditEvents,
+  onLoadBots,
+  onLoadWebhooks,
   onLogout,
   onOpenSettings,
   onRequest,
+  onRotateBotToken,
+  onRotateWebhookToken,
   onSelectPanel,
+  onWebhookNameChange,
   rows,
   serverUrl,
+  webhooks,
 }: {
   accountName: string
   activePanel: OpenCordSettingsPanel
+  auditEvents: AuditEvent[]
+  botApplications: BotApplicationDetail[]
+  developerBotName: string
+  developerChannelId: string | null
+  developerChannelName: string
+  developerFeedback: string | null
+  developerOrganizationId: string | null
+  developerSpaceId: string
+  developerStatus: 'idle' | 'loading'
+  developerWebhookName: string
   email: string
   feedback: string | null
   hasSavedDeviceSession: boolean
   logoutStatus: 'idle' | 'loading'
   maxHeight: number
+  onBotNameChange: (name: string) => void
   onClearSavedLogin: () => void
   onClose: () => void
+  onCreateBot: () => void
+  onCreateWebhook: () => void
+  onDeleteWebhook: (webhookId: string) => void
+  onInviteBot: (applicationId: string) => void
+  onLoadAuditEvents: () => void
+  onLoadBots: () => void
+  onLoadWebhooks: () => void
   onLogout: () => void
   onOpenSettings: () => void
   onRequest: (kind: MobileMediaPermissionKind) => void
+  onRotateBotToken: (applicationId: string) => void
+  onRotateWebhookToken: (webhookId: string) => void
   onSelectPanel: (panel: OpenCordSettingsPanel) => void
+  onWebhookNameChange: (name: string) => void
   rows: MobileMediaPermissionRow[]
   serverUrl: string
+  webhooks: IncomingWebhook[]
 }) {
   const visiblePanel = activePanel === 'native-call-integration' ? 'voice-video' : activePanel
   const permissionRows =
@@ -2538,7 +2978,7 @@ function MobileSettingsPanel({
     <ScrollView
       contentContainerStyle={styles.settingsPanelContent}
       nestedScrollEnabled
-      style={[styles.settingsPanel, { maxHeight }]}
+      style={[styles.settingsPanel, { height: maxHeight }]}
     >
       <View style={styles.settingsPanelHeader}>
         <View style={styles.settingsPanelTitleBlock}>
@@ -2643,6 +3083,32 @@ function MobileSettingsPanel({
           <SettingsInfoRow label="Density" value="Compact mobile" />
         </View>
       ) : null}
+      {visiblePanel === 'developer' ? (
+        <DeveloperSettingsRows
+          auditEvents={auditEvents}
+          botApplications={botApplications}
+          botName={developerBotName}
+          channelId={developerChannelId}
+          channelName={developerChannelName}
+          feedback={developerFeedback}
+          loading={developerStatus === 'loading'}
+          onBotNameChange={onBotNameChange}
+          onCreateBot={onCreateBot}
+          onCreateWebhook={onCreateWebhook}
+          onDeleteWebhook={onDeleteWebhook}
+          onInviteBot={onInviteBot}
+          onLoadAuditEvents={onLoadAuditEvents}
+          onLoadBots={onLoadBots}
+          onLoadWebhooks={onLoadWebhooks}
+          onRotateBotToken={onRotateBotToken}
+          onRotateWebhookToken={onRotateWebhookToken}
+          onWebhookNameChange={onWebhookNameChange}
+          organizationId={developerOrganizationId}
+          spaceId={developerSpaceId}
+          webhookName={developerWebhookName}
+          webhooks={webhooks}
+        />
+      ) : null}
     </ScrollView>
   )
 }
@@ -2666,6 +3132,252 @@ function SettingsInfoRow({
         {value}
       </Text>
     </View>
+  )
+}
+
+function DeveloperSettingsRows({
+  auditEvents,
+  botApplications,
+  botName,
+  channelId,
+  channelName,
+  feedback,
+  loading,
+  onBotNameChange,
+  onCreateBot,
+  onCreateWebhook,
+  onDeleteWebhook,
+  onInviteBot,
+  onLoadAuditEvents,
+  onLoadBots,
+  onLoadWebhooks,
+  onRotateBotToken,
+  onRotateWebhookToken,
+  onWebhookNameChange,
+  organizationId,
+  spaceId,
+  webhookName,
+  webhooks,
+}: {
+  auditEvents: AuditEvent[]
+  botApplications: BotApplicationDetail[]
+  botName: string
+  channelId: string | null
+  channelName: string
+  feedback: string | null
+  loading: boolean
+  onBotNameChange: (name: string) => void
+  onCreateBot: () => void
+  onCreateWebhook: () => void
+  onDeleteWebhook: (webhookId: string) => void
+  onInviteBot: (applicationId: string) => void
+  onLoadAuditEvents: () => void
+  onLoadBots: () => void
+  onLoadWebhooks: () => void
+  onRotateBotToken: (applicationId: string) => void
+  onRotateWebhookToken: (webhookId: string) => void
+  onWebhookNameChange: (name: string) => void
+  organizationId: string | null
+  spaceId: string
+  webhookName: string
+  webhooks: IncomingWebhook[]
+}) {
+  const visibleAuditEvents = [...auditEvents]
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+    .slice(0, 5)
+
+  return (
+    <View style={styles.settingsSection}>
+      <SettingsInfoRow
+        detail="Uses your current signed-in server session."
+        label="Organization"
+        value={shortIdentifier(organizationId)}
+      />
+      <SettingsInfoRow label="Space" value={shortIdentifier(spaceId)} />
+      <SettingsInfoRow
+        detail={channelId ? shortIdentifier(channelId) : 'Select a text channel first.'}
+        label="Webhook channel"
+        value={channelName}
+      />
+      {feedback ? <Text style={styles.permissionStatus}>{feedback}</Text> : null}
+      <View style={styles.settingsActionRow}>
+        <DeveloperActionButton disabled={loading} label="Load bots" onPress={onLoadBots} />
+        <DeveloperActionButton disabled={loading} label="Load hooks" onPress={onLoadWebhooks} />
+        <DeveloperActionButton disabled={loading} label="Load audit" onPress={onLoadAuditEvents} />
+      </View>
+
+      <Text style={styles.permissionTitle}>Bot Applications</Text>
+      <View style={styles.developerCreateRow}>
+        <TextInput
+          autoCapitalize="words"
+          onChangeText={onBotNameChange}
+          placeholder="Bot name"
+          placeholderTextColor="#777f79"
+          style={[styles.input, styles.developerInput]}
+          value={botName}
+        />
+        <DeveloperActionButton disabled={loading} label="Create" onPress={onCreateBot} />
+      </View>
+      {botApplications.length === 0 ? (
+        <Text style={styles.subtle}>No bot applications loaded.</Text>
+      ) : (
+        botApplications.map((bot) => (
+          <DeveloperBotRow
+            bot={bot}
+            disabled={loading}
+            key={bot.botApplication.id}
+            onInvite={onInviteBot}
+            onRotateToken={onRotateBotToken}
+          />
+        ))
+      )}
+
+      <Text style={styles.permissionTitle}>Incoming Webhooks</Text>
+      <View style={styles.developerCreateRow}>
+        <TextInput
+          autoCapitalize="words"
+          onChangeText={onWebhookNameChange}
+          placeholder="Webhook name"
+          placeholderTextColor="#777f79"
+          style={[styles.input, styles.developerInput]}
+          value={webhookName}
+        />
+        <DeveloperActionButton disabled={loading} label="Create" onPress={onCreateWebhook} />
+      </View>
+      {webhooks.length === 0 ? (
+        <Text style={styles.subtle}>No incoming webhooks loaded for this channel.</Text>
+      ) : (
+        webhooks.map((webhook) => (
+          <DeveloperWebhookRow
+            disabled={loading}
+            key={webhook.id}
+            onDelete={onDeleteWebhook}
+            onRotateToken={onRotateWebhookToken}
+            webhook={webhook}
+          />
+        ))
+      )}
+
+      <Text style={styles.permissionTitle}>Audit Events</Text>
+      {visibleAuditEvents.length === 0 ? (
+        <Text style={styles.subtle}>No audit events loaded for this space.</Text>
+      ) : (
+        visibleAuditEvents.map((event) => (
+          <View key={event.id} style={styles.developerCard}>
+            <View style={styles.permissionCopy}>
+              <Text style={styles.permissionLabel}>{event.action}</Text>
+              <Text style={styles.subtle}>
+                {event.targetType} {shortIdentifier(event.targetId)}
+              </Text>
+              <Text style={styles.permissionStatus}>{formatCompactDateTime(event.createdAt)}</Text>
+            </View>
+          </View>
+        ))
+      )}
+    </View>
+  )
+}
+
+function DeveloperBotRow({
+  bot,
+  disabled,
+  onInvite,
+  onRotateToken,
+}: {
+  bot: BotApplicationDetail
+  disabled: boolean
+  onInvite: (applicationId: string) => void
+  onRotateToken: (applicationId: string) => void
+}) {
+  return (
+    <View style={styles.developerCard}>
+      <View style={styles.permissionCopy}>
+        <Text style={styles.permissionLabel}>{bot.botApplication.name}</Text>
+        <Text style={styles.subtle}>
+          Token {lastFourSecretLabel(bot.activeTokenLastFour)} · {bot.spaceMemberships.length}{' '}
+          space{bot.spaceMemberships.length === 1 ? '' : 's'}
+        </Text>
+        {bot.botApplication.description ? (
+          <Text style={styles.subtle}>{bot.botApplication.description}</Text>
+        ) : null}
+      </View>
+      <View style={styles.settingsActionRow}>
+        <DeveloperActionButton
+          disabled={disabled}
+          label="Rotate"
+          onPress={() => onRotateToken(bot.botApplication.id)}
+        />
+        <DeveloperActionButton
+          disabled={disabled}
+          label="Invite"
+          onPress={() => onInvite(bot.botApplication.id)}
+        />
+      </View>
+    </View>
+  )
+}
+
+function DeveloperWebhookRow({
+  disabled,
+  onDelete,
+  onRotateToken,
+  webhook,
+}: {
+  disabled: boolean
+  onDelete: (webhookId: string) => void
+  onRotateToken: (webhookId: string) => void
+  webhook: IncomingWebhook
+}) {
+  return (
+    <View style={styles.developerCard}>
+      <View style={styles.permissionCopy}>
+        <Text style={styles.permissionLabel}>{webhook.name}</Text>
+        <Text style={styles.subtle}>
+          Token {lastFourSecretLabel(webhook.tokenLastFour)} · {shortIdentifier(webhook.id)}
+        </Text>
+        <Text style={styles.permissionStatus}>{webhook.status}</Text>
+      </View>
+      <View style={styles.settingsActionRow}>
+        <DeveloperActionButton
+          disabled={disabled}
+          label="Rotate"
+          onPress={() => onRotateToken(webhook.id)}
+        />
+        <DeveloperActionButton
+          danger
+          disabled={disabled}
+          label="Delete"
+          onPress={() => onDelete(webhook.id)}
+        />
+      </View>
+    </View>
+  )
+}
+
+function DeveloperActionButton({
+  danger,
+  disabled,
+  label,
+  onPress,
+}: {
+  danger?: boolean
+  disabled: boolean
+  label: string
+  onPress: () => void
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      disabled={disabled}
+      onPress={onPress}
+      style={[
+        danger ? styles.dangerSettingsButton : styles.secondarySettingsButton,
+        styles.developerActionButton,
+        disabled ? styles.disabledSettingsButton : null,
+      ]}
+    >
+      <Text style={styles.primaryButtonText}>{label}</Text>
+    </Pressable>
   )
 }
 
@@ -3543,6 +4255,50 @@ function isServerBackedId(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)
 }
 
+function incomingWebhookDetailFromShownToken(webhook: IncomingWebhookWithToken): IncomingWebhook {
+  return {
+    id: webhook.id,
+    organizationId: webhook.organizationId,
+    spaceId: webhook.spaceId,
+    channelId: webhook.channelId,
+    botUserId: webhook.botUserId,
+    createdByUserId: webhook.createdByUserId,
+    name: webhook.name,
+    status: webhook.status,
+    tokenLastFour: webhook.tokenLastFour,
+    createdAt: webhook.createdAt,
+  }
+}
+
+function shortIdentifier(value?: string | null) {
+  if (!value) {
+    return 'Unavailable'
+  }
+  if (value.length <= 12) {
+    return value
+  }
+
+  return `${value.slice(0, 8)}...${value.slice(-4)}`
+}
+
+function lastFourSecretLabel(value?: string | null) {
+  return value ? `****${value}` : 'not issued'
+}
+
+function formatCompactDateTime(value: string) {
+  const date = parseMeetingDate(value)
+  if (!date) {
+    return value
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    month: 'short',
+  }).format(date)
+}
+
 function formatMeetingDay(value: string) {
   const date = parseMeetingDate(value)
   if (!date) {
@@ -4221,6 +4977,7 @@ const styles = StyleSheet.create({
   settingsPanel: {
     borderBottomColor: '#2b2f2d',
     borderBottomWidth: 1,
+    flexShrink: 1,
   },
   settingsPanelContent: {
     gap: 10,
@@ -4286,6 +5043,27 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
+  },
+  developerCreateRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  developerInput: {
+    flex: 1,
+    minWidth: 180,
+  },
+  developerCard: {
+    borderColor: '#333a36',
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: 10,
+    padding: 10,
+  },
+  developerActionButton: {
+    flexGrow: 0,
+    minWidth: 82,
   },
   secondarySettingsButton: {
     alignItems: 'center',

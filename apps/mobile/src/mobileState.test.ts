@@ -1154,6 +1154,8 @@ describe('mobile app state', () => {
         id: '019ef679-303f-72f2-83bd-4501222533f2',
         kind: 'voice',
         name: 'Standup',
+        organizationId: '019ef679-303f-72f2-83bd-4501222533f0',
+        spaceId: '019ef679-303f-72f2-83bd-4501222533f1',
         topic: 'Voice channel',
         unread: false,
       },

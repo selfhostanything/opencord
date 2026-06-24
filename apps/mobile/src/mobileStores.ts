@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Meeting } from '@opencord/api-client'
+import type { AuditEvent, BotApplicationDetail, IncomingWebhook, Meeting } from '@opencord/api-client'
 import {
   buildOpenCordRoutePath,
   type OpenCordRouteTarget,
@@ -107,6 +107,18 @@ export type MobileMeetingsStore = {
   upsertMeeting: (meeting: Meeting) => void
 }
 
+export type MobileDeveloperStore = {
+  auditEventsBySpaceId: Record<string, AuditEvent[]>
+  botApplications: BotApplicationDetail[]
+  webhooksByChannelId: Record<string, IncomingWebhook[]>
+  removeIncomingWebhook: (channelId: string, webhookId: string) => void
+  setAuditEvents: (spaceId: string, auditEvents: AuditEvent[]) => void
+  setBotApplications: (botApplications: BotApplicationDetail[]) => void
+  setIncomingWebhooks: (channelId: string, webhooks: IncomingWebhook[]) => void
+  upsertBotApplication: (botApplication: BotApplicationDetail) => void
+  upsertIncomingWebhook: (channelId: string, webhook: IncomingWebhook) => void
+}
+
 export type MobileVoiceScreenShareWatcher =
   | { status: 'idle'; remoteScreenShares: 0 }
   | { status: 'watching'; remoteScreenShares: number }
@@ -186,6 +198,20 @@ const initialMeetingsData = {
   | 'setLocalReminder'
   | 'setMeetings'
   | 'upsertMeeting'
+>
+
+const initialDeveloperData = {
+  auditEventsBySpaceId: {},
+  botApplications: [],
+  webhooksByChannelId: {},
+} satisfies Omit<
+  MobileDeveloperStore,
+  | 'removeIncomingWebhook'
+  | 'setAuditEvents'
+  | 'setBotApplications'
+  | 'setIncomingWebhooks'
+  | 'upsertBotApplication'
+  | 'upsertIncomingWebhook'
 >
 
 const initialVoiceData = {
@@ -335,6 +361,58 @@ export const useMobileMeetingsStore = create<MobileMeetingsStore>((set) => ({
     })),
 }))
 
+export const useMobileDeveloperStore = create<MobileDeveloperStore>((set) => ({
+  ...initialDeveloperData,
+  removeIncomingWebhook: (channelId, webhookId) =>
+    set((state) => ({
+      webhooksByChannelId: {
+        ...state.webhooksByChannelId,
+        [channelId]: (state.webhooksByChannelId[channelId] ?? []).filter(
+          (webhook) => webhook.id !== webhookId,
+        ),
+      },
+    })),
+  setAuditEvents: (spaceId, auditEvents) =>
+    set((state) => ({
+      auditEventsBySpaceId: {
+        ...state.auditEventsBySpaceId,
+        [spaceId]: auditEvents,
+      },
+    })),
+  setBotApplications: (botApplications) => set({ botApplications }),
+  setIncomingWebhooks: (channelId, webhooks) =>
+    set((state) => ({
+      webhooksByChannelId: {
+        ...state.webhooksByChannelId,
+        [channelId]: webhooks,
+      },
+    })),
+  upsertBotApplication: (botApplication) =>
+    set((state) => ({
+      botApplications: [
+        ...state.botApplications.filter(
+          (candidate) =>
+            candidate.botApplication.id !== botApplication.botApplication.id,
+        ),
+        botApplication,
+      ].sort((left, right) =>
+        left.botApplication.name.localeCompare(right.botApplication.name),
+      ),
+    })),
+  upsertIncomingWebhook: (channelId, webhook) =>
+    set((state) => ({
+      webhooksByChannelId: {
+        ...state.webhooksByChannelId,
+        [channelId]: [
+          ...(state.webhooksByChannelId[channelId] ?? []).filter(
+            (candidate) => candidate.id !== webhook.id,
+          ),
+          webhook,
+        ].sort((left, right) => left.name.localeCompare(right.name)),
+      },
+    })),
+}))
+
 export const useMobileVoiceStore = create<MobileVoiceStore>((set) => ({
   ...initialVoiceData,
   joinRoute: (activeRoute) =>
@@ -362,6 +440,7 @@ export function clearMobileRuntimeStores() {
   useMobileSessionStore.setState(initialSessionData)
   useMobileChatStore.setState(initialChatData)
   useMobileMeetingsStore.setState(initialMeetingsData)
+  useMobileDeveloperStore.setState(initialDeveloperData)
   useMobileVoiceStore.setState(initialVoiceData)
   useMobileSettingsStore.setState(initialSettingsData)
 }

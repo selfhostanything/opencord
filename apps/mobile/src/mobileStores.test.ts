@@ -6,6 +6,7 @@ import {
   clearMobileRuntimeStores,
   resetMobileStoresForTest,
   useMobileChatStore,
+  useMobileDeveloperStore,
   useMobileMeetingsStore,
   useMobileSessionStore,
   useMobileSettingsStore,
@@ -178,6 +179,74 @@ describe('mobile Zustand stores', () => {
     expect(useMobileMeetingsStore.getState().form).toBeNull()
   })
 
+  it('tracks developer bots, webhooks, and audit readback without raw tokens', () => {
+    useMobileDeveloperStore.getState().setBotApplications([
+      mobileBotApplicationFixture({
+        botApplication: {
+          ...baseMobileBotApplicationDetail().botApplication,
+          id: 'bot-z',
+          name: 'Zulu Bot',
+        },
+      }),
+    ])
+    useMobileDeveloperStore.getState().upsertBotApplication(
+      mobileBotApplicationFixture({
+        activeTokenLastFour: 'last',
+        botApplication: {
+          ...baseMobileBotApplicationDetail().botApplication,
+          id: 'bot-a',
+          name: 'Alpha Bot',
+        },
+      }),
+    )
+    useMobileDeveloperStore.getState().setIncomingWebhooks('general', [
+      mobileIncomingWebhookFixture({
+        id: 'hook-z',
+        name: 'Zulu Hook',
+        tokenLastFour: 'zzzz',
+      }),
+    ])
+    useMobileDeveloperStore.getState().upsertIncomingWebhook(
+      'general',
+      mobileIncomingWebhookFixture({
+        id: 'hook-a',
+        name: 'Alpha Hook',
+        tokenLastFour: 'last',
+      }),
+    )
+    useMobileDeveloperStore.getState().setAuditEvents('space-1', [
+      mobileAuditEventFixture({
+        action: 'webhook.created',
+        metadata: { name: 'Alpha Hook' },
+      }),
+    ])
+
+    expect(
+      useMobileDeveloperStore
+        .getState()
+        .botApplications.map((detail) => detail.botApplication.name),
+    ).toEqual(['Alpha Bot', 'Zulu Bot'])
+    expect(
+      useMobileDeveloperStore
+        .getState()
+        .webhooksByChannelId.general.map((webhook) => webhook.name),
+    ).toEqual(['Alpha Hook', 'Zulu Hook'])
+    expect(useMobileDeveloperStore.getState().auditEventsBySpaceId['space-1']).toEqual([
+      expect.objectContaining({
+        action: 'webhook.created',
+        metadata: { name: 'Alpha Hook' },
+      }),
+    ])
+
+    useMobileDeveloperStore.getState().removeIncomingWebhook('general', 'hook-z')
+    expect(useMobileDeveloperStore.getState().webhooksByChannelId.general).toEqual([
+      expect.objectContaining({ id: 'hook-a' }),
+    ])
+    expect(JSON.stringify(useMobileDeveloperStore.getState())).not.toContain('ocb_shown_once')
+    expect(JSON.stringify(useMobileDeveloperStore.getState())).not.toContain('ocw_shown_once')
+    expect(JSON.stringify(useMobileDeveloperStore.getState())).not.toContain('"token"')
+  })
+
   it('tracks voice route, mute/deafen controls, and screen-share watcher state', () => {
     useMobileVoiceStore.getState().joinRoute({
       kind: 'channel',
@@ -246,6 +315,9 @@ describe('mobile Zustand stores', () => {
     useMobileChatStore.getState().setComposerText('general', 'draft')
     useMobileChatStore.getState().beginReply({ channelId: 'general', messageId: 'msg-1' })
     useMobileMeetingsStore.getState().setMeetings([mobileMeetingFixture()])
+    useMobileDeveloperStore.getState().setIncomingWebhooks('general', [
+      mobileIncomingWebhookFixture(),
+    ])
     useMobileVoiceStore.getState().joinRoute({
       kind: 'channel',
       serverId: 'local-opencord',
@@ -269,6 +341,11 @@ describe('mobile Zustand stores', () => {
       meetings: [],
       selectedMeetingId: null,
     })
+    expect(useMobileDeveloperStore.getState()).toMatchObject({
+      auditEventsBySpaceId: {},
+      botApplications: [],
+      webhooksByChannelId: {},
+    })
     expect(useMobileVoiceStore.getState()).toMatchObject({
       activeRoute: null,
       connectionStatus: 'idle',
@@ -282,6 +359,85 @@ function mobileMeetingFixture(overrides: Partial<ReturnType<typeof baseMobileMee
   return {
     ...baseMobileMeetingFixture(),
     ...overrides,
+  }
+}
+
+function mobileBotApplicationFixture(
+  overrides: Partial<ReturnType<typeof baseMobileBotApplicationDetail>> = {},
+) {
+  return {
+    ...baseMobileBotApplicationDetail(),
+    ...overrides,
+  }
+}
+
+function baseMobileBotApplicationDetail() {
+  return {
+    botApplication: {
+      id: 'bot-1',
+      organizationId: 'org-1',
+      botUserId: 'bot-user-1',
+      createdByUserId: 'user-1',
+      name: 'Deploy Bot',
+      description: 'Posts release status',
+      status: 'active',
+    },
+    activeTokenLastFour: 'last',
+    spaceMemberships: [
+      {
+        spaceId: 'space-1',
+        userId: 'bot-user-1',
+        role: 'member',
+        status: 'active',
+      },
+    ],
+  }
+}
+
+function mobileIncomingWebhookFixture(
+  overrides: Partial<ReturnType<typeof baseMobileIncomingWebhook>> = {},
+) {
+  return {
+    ...baseMobileIncomingWebhook(),
+    ...overrides,
+  }
+}
+
+function baseMobileIncomingWebhook() {
+  return {
+    id: 'hook-1',
+    organizationId: 'org-1',
+    spaceId: 'space-1',
+    channelId: 'general',
+    botUserId: 'bot-user-1',
+    createdByUserId: 'user-1',
+    name: 'Release Hook',
+    status: 'active',
+    tokenLastFour: 'last',
+    createdAt: '2026-06-25T10:00:00Z',
+  }
+}
+
+function mobileAuditEventFixture(
+  overrides: Partial<ReturnType<typeof baseMobileAuditEvent>> = {},
+) {
+  return {
+    ...baseMobileAuditEvent(),
+    ...overrides,
+  }
+}
+
+function baseMobileAuditEvent() {
+  return {
+    id: 'audit-1',
+    organizationId: 'org-1',
+    spaceId: 'space-1',
+    actorUserId: 'user-1',
+    action: 'bot.created',
+    targetType: 'bot_application',
+    targetId: 'bot-1',
+    metadata: {},
+    createdAt: '2026-06-25T10:00:00Z',
   }
 }
 

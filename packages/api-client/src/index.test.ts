@@ -1450,6 +1450,97 @@ describe('OpenCord API client', () => {
     )
   })
 
+  it('lists and exports audit events with bearer auth', async () => {
+    const auditEventPayload = {
+      id: '01973f83-f22a-73ba-ae76-5a045c52fcf1',
+      organization_id: '01973f83-f22a-73ba-ae76-5a045c52fcf2',
+      space_id: '01973f83-f22a-73ba-ae76-5a045c52fcf3',
+      actor_user_id: '01973f83-f22a-73ba-ae76-5a045c52fcf4',
+      action: 'webhook.created',
+      target_type: 'webhook',
+      target_id: '01973f83-f22a-73ba-ae76-5a045c52fcf5',
+      metadata: {
+        channel_id: '01973f83-f22a-73ba-ae76-5a045c52fcf6',
+        name: 'Release Hook',
+      },
+      created_at: '2026-06-25T02:00:00.000Z',
+    }
+    const fetchMock = vi
+      .fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          audit_events: [auditEventPayload],
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          export: {
+            organization_id: '01973f83-f22a-73ba-ae76-5a045c52fcf2',
+            format: 'json',
+            from: '2026-06-25T00:00:00.000Z',
+            to: '2026-06-25T03:00:00.000Z',
+            audit_events: [auditEventPayload],
+          },
+        }),
+      )
+    const client = createOpenCordApiClient({
+      baseUrl: 'https://chat.example.com',
+      fetch: fetchMock,
+      sessionToken: 'session-token',
+    })
+
+    const expectedAuditEvent = {
+      id: '01973f83-f22a-73ba-ae76-5a045c52fcf1',
+      organizationId: '01973f83-f22a-73ba-ae76-5a045c52fcf2',
+      spaceId: '01973f83-f22a-73ba-ae76-5a045c52fcf3',
+      actorUserId: '01973f83-f22a-73ba-ae76-5a045c52fcf4',
+      action: 'webhook.created',
+      targetType: 'webhook',
+      targetId: '01973f83-f22a-73ba-ae76-5a045c52fcf5',
+      metadata: {
+        channel_id: '01973f83-f22a-73ba-ae76-5a045c52fcf6',
+        name: 'Release Hook',
+      },
+      createdAt: '2026-06-25T02:00:00.000Z',
+    }
+
+    await expect(
+      client.listSpaceAuditEvents('01973f83-f22a-73ba-ae76-5a045c52fcf3'),
+    ).resolves.toEqual([expectedAuditEvent])
+    await expect(
+      client.exportOrganizationAuditEvents('01973f83-f22a-73ba-ae76-5a045c52fcf2', {
+        from: '2026-06-25T00:00:00.000Z',
+        to: '2026-06-25T03:00:00.000Z',
+      }),
+    ).resolves.toEqual({
+      organizationId: '01973f83-f22a-73ba-ae76-5a045c52fcf2',
+      format: 'json',
+      from: '2026-06-25T00:00:00.000Z',
+      to: '2026-06-25T03:00:00.000Z',
+      auditEvents: [expectedAuditEvent],
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      'https://chat.example.com/spaces/01973f83-f22a-73ba-ae76-5a045c52fcf3/audit-events',
+      {
+        headers: {
+          Accept: 'application/json',
+          Authorization: 'Bearer session-token',
+        },
+      },
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      'https://chat.example.com/organizations/01973f83-f22a-73ba-ae76-5a045c52fcf2/audit-events/export?from=2026-06-25T00%3A00%3A00.000Z&to=2026-06-25T03%3A00%3A00.000Z',
+      {
+        headers: {
+          Accept: 'application/json',
+          Authorization: 'Bearer session-token',
+        },
+      },
+    )
+  })
+
   it('resolves meeting join URLs through the typed API', async () => {
     const fetchMock = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>()
     fetchMock.mockResolvedValue(

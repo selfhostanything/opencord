@@ -432,6 +432,31 @@ export type IncomingWebhookWithToken = IncomingWebhook & {
   executeUrl: string
 }
 
+export type AuditEvent = {
+  id: string
+  organizationId: string
+  spaceId: string
+  actorUserId: string
+  action: string
+  targetType: string
+  targetId: string
+  metadata: Record<string, unknown>
+  createdAt: string
+}
+
+export type ExportAuditEventsRequest = {
+  from: string
+  to: string
+}
+
+export type AuditExport = {
+  organizationId: string
+  format: string
+  from: string
+  to: string
+  auditEvents: AuditEvent[]
+}
+
 export type OpenCordApiClientOptions = {
   baseUrl?: string
   credentials?: RequestCredentials
@@ -795,6 +820,34 @@ type IncomingWebhookResourcePayload = {
 
 type IncomingWebhookListPayload = {
   webhooks?: unknown
+}
+
+type AuditEventPayload = {
+  id?: unknown
+  organization_id?: unknown
+  space_id?: unknown
+  actor_user_id?: unknown
+  action?: unknown
+  target_type?: unknown
+  target_id?: unknown
+  metadata?: unknown
+  created_at?: unknown
+}
+
+type AuditEventListPayload = {
+  audit_events?: unknown
+}
+
+type AuditExportPayload = {
+  organization_id?: unknown
+  format?: unknown
+  from?: unknown
+  to?: unknown
+  audit_events?: unknown
+}
+
+type AuditExportEnvelopePayload = {
+  export?: unknown
 }
 
 type ErrorPayload = {
@@ -1339,6 +1392,29 @@ export class OpenCordApiClient {
     )
   }
 
+  async listSpaceAuditEvents(spaceId: string): Promise<AuditEvent[]> {
+    const payload = await this.requestJson<AuditEventListPayload>(
+      `/spaces/${encodeURIComponent(spaceId)}/audit-events`,
+    )
+
+    return arrayValue(payload.audit_events).map(auditEventFromPayload)
+  }
+
+  async exportOrganizationAuditEvents(
+    organizationId: string,
+    request: ExportAuditEventsRequest,
+  ): Promise<AuditExport> {
+    const query = new URLSearchParams({
+      from: request.from,
+      to: request.to,
+    }).toString()
+    const payload = await this.requestJson<AuditExportEnvelopePayload>(
+      `/organizations/${encodeURIComponent(organizationId)}/audit-events/export?${query}`,
+    )
+
+    return auditExportFromPayload(payload.export)
+  }
+
   async createBotApplication(
     organizationId: string,
     request: CreateBotApplicationRequest,
@@ -1597,6 +1673,34 @@ function incomingWebhookWithTokenFromPayload(value: unknown): IncomingWebhookWit
     ...incomingWebhookFromPayload(payload),
     token: stringValue(payload.token, ''),
     executeUrl: stringValue(payload.execute_url, ''),
+  }
+}
+
+function auditEventFromPayload(value: unknown): AuditEvent {
+  const payload = objectValue(value) as AuditEventPayload
+
+  return {
+    id: stringValue(payload.id, ''),
+    organizationId: stringValue(payload.organization_id, ''),
+    spaceId: stringValue(payload.space_id, ''),
+    actorUserId: stringValue(payload.actor_user_id, ''),
+    action: stringValue(payload.action, ''),
+    targetType: stringValue(payload.target_type, ''),
+    targetId: stringValue(payload.target_id, ''),
+    metadata: objectValue(payload.metadata),
+    createdAt: stringValue(payload.created_at, ''),
+  }
+}
+
+function auditExportFromPayload(value: unknown): AuditExport {
+  const payload = objectValue(value) as AuditExportPayload
+
+  return {
+    organizationId: stringValue(payload.organization_id, ''),
+    format: stringValue(payload.format, 'json'),
+    from: stringValue(payload.from, ''),
+    to: stringValue(payload.to, ''),
+    auditEvents: arrayValue(payload.audit_events).map(auditEventFromPayload),
   }
 }
 

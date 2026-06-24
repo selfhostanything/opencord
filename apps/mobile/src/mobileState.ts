@@ -75,6 +75,75 @@ export type MobileWorkspaceNavigatorSection = {
   channels: MobileWorkspaceChannelRow[]
 }
 
+export type MobileSearchScope = 'all' | 'channels' | 'messages' | 'mentions'
+
+export type MobileSearchStatus =
+  | 'idle'
+  | 'loading'
+  | 'ready'
+  | 'empty'
+  | 'error'
+  | 'permission-denied'
+
+export type MobileSearchAvailability =
+  | { status: Extract<MobileSearchStatus, 'loading'>; message?: string }
+  | { status: Extract<MobileSearchStatus, 'error' | 'permission-denied'>; message: string }
+  | { status: Extract<MobileSearchStatus, 'ready'>; message?: string }
+
+export type MobileSearchChannelResult = {
+  kind: 'channel'
+  channelId: string
+  channelKind: MobileChannel['kind']
+  channelName: string
+  topic: string
+}
+
+export type MobileSearchMessageResult = {
+  kind: 'message'
+  channelId: string
+  channelName: string
+  excerpt: string
+  authorName: string
+  messageId: string
+  time: string
+}
+
+export type MobileSearchMentionResult = Omit<MobileSearchMessageResult, 'kind'> & {
+  kind: 'mention'
+  mentionLabel: string
+}
+
+export type MobileSearchViewModel = {
+  channelResults: MobileSearchChannelResult[]
+  mentionResults: MobileSearchMentionResult[]
+  message: string
+  messageResults: MobileSearchMessageResult[]
+  query: string
+  scope: MobileSearchScope
+  status: MobileSearchStatus
+  totalResults: number
+}
+
+export type MobileMemberPresence =
+  | 'online'
+  | 'idle'
+  | 'speaking'
+  | 'muted'
+  | 'deafened'
+  | 'offline'
+
+export type MobileMemberRow = {
+  id: string
+  activity: string
+  bot?: boolean
+  displayName: string
+  presence: MobileMemberPresence
+  role: string
+  self?: boolean
+  voiceChannelId?: string
+  voiceChannelName?: string
+}
+
 export type MobileMessage = {
   id: string
   channelId: string
@@ -460,6 +529,27 @@ const initialMessages: MobileMessage[] = [
     own: false,
     deliveryStatus: 'sent',
     mentions: [],
+  },
+  {
+    id: 'seed-mention-1',
+    channelId: 'general',
+    authorName: 'Mira',
+    authorKind: 'user',
+    content: '@OpenCord please review the mobile search pass.',
+    attachments: [],
+    components: [],
+    embeds: [],
+    time: '09:14',
+    own: false,
+    deliveryStatus: 'sent',
+    mentions: [
+      {
+        display: 'OpenCord',
+        query: 'opencord',
+        start: 0,
+        end: 9,
+      },
+    ],
   },
   {
     id: 'seed-2',
@@ -1271,6 +1361,192 @@ export function mobileWorkspaceNavigatorSections(
   return Array.from(sections.values())
 }
 
+export function mobileSearchViewModel(
+  state: MobileAppState,
+  {
+    availability = { status: 'ready' },
+    query = '',
+    scope = 'all',
+  }: {
+    availability?: MobileSearchAvailability
+    query?: string
+    scope?: MobileSearchScope
+  } = {},
+): MobileSearchViewModel {
+  const trimmedQuery = query.trim()
+  const normalizedQuery = normalizeSearchText(trimmedQuery)
+  const emptyResults = {
+    channelResults: [],
+    mentionResults: [],
+    messageResults: [],
+    query: trimmedQuery,
+    scope,
+    totalResults: 0,
+  }
+
+  if (availability.status !== 'ready') {
+    return {
+      ...emptyResults,
+      message: availability.message ?? mobileSearchStatusMessage(availability.status, scope),
+      status: availability.status,
+    }
+  }
+
+  const shouldShowRecentMentions = scope === 'mentions' && !normalizedQuery
+  if (!normalizedQuery && !shouldShowRecentMentions) {
+    return {
+      ...emptyResults,
+      message: 'Search channels, messages, or recent mentions.',
+      status: 'idle',
+    }
+  }
+
+  const includeChannels = scope === 'all' || scope === 'channels'
+  const includeMessages = scope === 'all' || scope === 'messages'
+  const includeMentions = scope === 'all' || scope === 'mentions'
+  const channelResults = includeChannels
+    ? state.channels
+        .filter((channel) =>
+          normalizedQuery
+            ? matchesSearchQuery(normalizedQuery, channel.name, channel.topic)
+            : false,
+        )
+        .map((channel) => ({
+          kind: 'channel' as const,
+          channelId: channel.id,
+          channelKind: channel.kind,
+          channelName: channel.name,
+          topic: channel.topic,
+        }))
+    : []
+  const searchableMessages = [...state.messages].reverse().filter((message) => !message.deleted)
+  const messageResults = includeMessages
+    ? searchableMessages
+        .filter((message) => {
+          const channel = state.channels.find((candidate) => candidate.id === message.channelId)
+          return normalizedQuery
+            ? matchesSearchQuery(normalizedQuery, message.content, message.authorName, channel?.name)
+            : false
+        })
+        .map((message) => mobileSearchMessageResult(state, message))
+        .slice(0, 20)
+    : []
+  const mentionResults = includeMentions
+    ? searchableMessages
+        .flatMap((message) => {
+          const mentionLabels = mobileMessageMentionLabels(message)
+          if (mentionLabels.length === 0) {
+            return []
+          }
+          const channel = state.channels.find((candidate) => candidate.id === message.channelId)
+          const matches =
+            !normalizedQuery ||
+            matchesSearchQuery(
+              normalizedQuery,
+              message.content,
+              message.authorName,
+              channel?.name,
+              ...mentionLabels,
+            )
+          if (!matches) {
+            return []
+          }
+
+          return [
+            {
+              ...mobileSearchMessageResult(state, message),
+              kind: 'mention' as const,
+              mentionLabel: mentionLabels.join(', '),
+            },
+          ]
+        })
+        .slice(0, 20)
+    : []
+  const totalResults = channelResults.length + messageResults.length + mentionResults.length
+
+  return {
+    channelResults,
+    mentionResults,
+    message: totalResults
+      ? `${totalResults} result${totalResults === 1 ? '' : 's'}`
+      : mobileSearchStatusMessage('empty', scope),
+    messageResults,
+    query: trimmedQuery,
+    scope,
+    status: totalResults > 0 ? 'ready' : 'empty',
+    totalResults,
+  }
+}
+
+export function mobileMemberRows(
+  state: MobileAppState,
+  channelId = state.selectedChannelId,
+): MobileMemberRow[] {
+  const rows = new Map<string, MobileMemberRow>()
+  const selected = state.channels.find((channel) => channel.id === channelId)
+  const selectedChannelName = selected?.name ?? 'channel'
+
+  if (state.account) {
+    rows.set('self', {
+      id: 'self',
+      activity: `Viewing #${selectedChannelName}`,
+      displayName: state.account.displayName,
+      presence: 'online',
+      role: 'You',
+      self: true,
+    })
+  }
+
+  for (const message of state.messages.filter((candidate) => candidate.channelId === channelId)) {
+    if (message.deleted || message.authorKind === 'system') {
+      continue
+    }
+    const id = message.own ? 'self' : mobileMemberId(message.authorName)
+    const existing = rows.get(id)
+    rows.set(id, {
+      id,
+      activity: existing?.activity ?? `Last active in #${selectedChannelName}`,
+      bot: message.authorKind === 'bot' || message.authorKind === 'webhook',
+      displayName: existing?.displayName ?? (message.own ? state.account?.displayName ?? 'You' : message.authorName),
+      presence: existing?.presence ?? 'online',
+      role: existing?.role ?? mobileMemberRole(message.authorKind),
+      self: existing?.self ?? message.own,
+    })
+  }
+
+  for (const participant of state.voice.participants) {
+    const id = participant.self ? 'self' : mobileMemberId(participant.name)
+    const channel = state.channels.find((candidate) => candidate.id === participant.channelId)
+    const voiceChannelName = channel?.name ?? 'voice'
+    const existing = rows.get(id)
+    const presence = mobilePresenceForVoiceParticipant(participant)
+    rows.set(id, {
+      id,
+      activity: mobileVoiceActivityLabel(presence, voiceChannelName),
+      bot: existing?.bot,
+      displayName: existing?.displayName ?? (participant.self ? state.account?.displayName ?? 'You' : participant.name),
+      presence,
+      role: existing?.role ?? (participant.self ? 'You' : 'Voice'),
+      self: existing?.self ?? participant.self,
+      voiceChannelId: participant.channelId,
+      voiceChannelName,
+    })
+  }
+
+  return Array.from(rows.values()).sort((left, right) => {
+    const selfRank = Number(Boolean(right.self)) - Number(Boolean(left.self))
+    if (selfRank !== 0) {
+      return selfRank
+    }
+
+    return (
+      mobilePresenceRank(left.presence) - mobilePresenceRank(right.presence) ||
+      Number(Boolean(left.bot)) - Number(Boolean(right.bot)) ||
+      left.displayName.localeCompare(right.displayName)
+    )
+  })
+}
+
 export function mobileRouteTargetForChannel(
   state: MobileAppState,
   channelId = state.selectedChannelId,
@@ -1286,6 +1562,26 @@ export function mobileRouteTargetForChannel(
     organizationId: channel.organizationId ?? DEFAULT_MOBILE_ORGANIZATION_ID,
     spaceId: channel.spaceId ?? DEFAULT_MOBILE_SPACE_ID,
     channelId: channel.id,
+  }
+}
+
+export function mobileRouteTargetForMessage(
+  state: MobileAppState,
+  messageId: string,
+): OpenCordRouteTarget | null {
+  const message = state.messages.find((candidate) => candidate.id === messageId)
+  if (!message) {
+    return null
+  }
+  const channelTarget = mobileRouteTargetForChannel(state, message.channelId)
+  if (!channelTarget || channelTarget.kind !== 'channel') {
+    return null
+  }
+
+  return {
+    ...channelTarget,
+    kind: 'message',
+    messageId: message.id,
   }
 }
 
@@ -1309,6 +1605,134 @@ export function selectedChannel(state: MobileAppState) {
 
 export function activeMobileServerConnection(state: MobileAppState) {
   return activeServerConnection(state.serverConnections)
+}
+
+function mobileSearchMessageResult(
+  state: MobileAppState,
+  message: MobileMessage,
+): MobileSearchMessageResult {
+  const channel = state.channels.find((candidate) => candidate.id === message.channelId)
+
+  return {
+    kind: 'message',
+    authorName: message.own ? state.account?.displayName ?? message.authorName : message.authorName,
+    channelId: message.channelId,
+    channelName: channel?.name ?? 'unknown',
+    excerpt: mobileMessageExcerpt(message),
+    messageId: message.id,
+    time: message.time,
+  }
+}
+
+function mobileMessageExcerpt(message: MobileMessage) {
+  const content = message.content.trim()
+  if (content) {
+    return content.length > 110 ? `${content.slice(0, 107)}...` : content
+  }
+  if (message.attachments.length > 0) {
+    return `${message.attachments.length} attachment${message.attachments.length === 1 ? '' : 's'}`
+  }
+  if (message.embeds.length > 0) {
+    return message.embeds[0]?.title ?? 'Embed'
+  }
+
+  return 'Message'
+}
+
+function mobileMessageMentionLabels(message: MobileMessage) {
+  const mentions = message.mentions?.length ? message.mentions : mobileMentionTokens(message.content)
+  return mentions.map((mention) => `@${mention.display}`)
+}
+
+function matchesSearchQuery(query: string, ...values: Array<string | null | undefined>) {
+  return values.some((value) => normalizeSearchText(value ?? '').includes(query))
+}
+
+function normalizeSearchText(value: string) {
+  return value.trim().toLowerCase()
+}
+
+function mobileSearchStatusMessage(status: MobileSearchStatus, scope: MobileSearchScope) {
+  switch (status) {
+    case 'idle':
+      return 'Search channels, messages, or recent mentions.'
+    case 'loading':
+      return 'Searching...'
+    case 'error':
+      return 'Search is unavailable.'
+    case 'permission-denied':
+      return 'Search is not available for this channel.'
+    case 'empty':
+      return scope === 'mentions' ? 'No recent mentions.' : 'No results found.'
+    case 'ready':
+      return 'Ready'
+  }
+}
+
+function mobileMemberId(displayName: string) {
+  return `member-${slugValue(displayName) || 'unknown'}`
+}
+
+function mobileMemberRole(authorKind: MobileMessageAuthorKind) {
+  switch (authorKind) {
+    case 'bot':
+      return 'Bot'
+    case 'webhook':
+      return 'Webhook'
+    case 'system':
+      return 'System'
+    case 'user':
+      return 'Member'
+  }
+}
+
+function mobilePresenceForVoiceParticipant(
+  participant: MobileVoiceParticipant,
+): MobileMemberPresence {
+  switch (participant.status) {
+    case 'speaking':
+      return 'speaking'
+    case 'muted':
+      return 'muted'
+    case 'deafened':
+      return 'deafened'
+    case 'connected':
+      return 'online'
+  }
+}
+
+function mobileVoiceActivityLabel(presence: MobileMemberPresence, channelName: string) {
+  switch (presence) {
+    case 'speaking':
+      return `Speaking in #${channelName}`
+    case 'muted':
+      return `Muted in #${channelName}`
+    case 'deafened':
+      return `Deafened in #${channelName}`
+    case 'online':
+      return `In voice #${channelName}`
+    case 'idle':
+      return 'Idle'
+    case 'offline':
+      return 'Offline'
+  }
+}
+
+function mobilePresenceRank(presence: MobileMemberPresence) {
+  switch (presence) {
+    case 'speaking':
+      return 0
+    case 'online':
+      return 1
+    case 'muted':
+      return 2
+    case 'deafened':
+      return 3
+    case 'idle':
+      return 4
+    case 'offline':
+      return 5
+  }
 }
 
 function mobileServerRouteId(connection: ServerConnection | null) {
@@ -1407,6 +1831,7 @@ function messageFromRealtimeEnvelope(envelope: RealtimeIncomingEnvelope): Mobile
     components,
     content,
     embeds,
+    mentions: mobileMentionTokens(content),
     time: timeLabel(envelope.occurred_at),
     own: false,
   }

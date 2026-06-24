@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
+import { useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react'
 import {
   FlatList,
   Image,
@@ -63,13 +63,17 @@ import {
   mobileMentionTokens,
   mobileMessageActionSheetOptions,
   mobileMessageTimelineGroups,
+  mobileMemberRows,
   mobileMediaPermissionRows,
   mobileRouteTargetForChannel,
+  mobileRouteTargetForMessage,
+  mobileSearchViewModel,
   mobileWorkspaceNavigatorSections,
   mobileReducer,
   mobileVoiceParticipantsForChannel,
   selectedChannel,
   type MobileChannel,
+  type MobileMemberRow,
   type MobileMessageActionId,
   type MobileMessageActionOption,
   type MobileMessageTimelineGroup,
@@ -79,6 +83,8 @@ import {
   type MobileMessage,
   type MobileMessageComponent,
   type MobileRichEmbed,
+  type MobileSearchScope,
+  type MobileSearchViewModel,
   type MobileWorkspaceChannelRow,
   type MobileVoiceParticipant,
 } from './src/mobileState'
@@ -239,6 +245,11 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
   const [developerFeedback, setDeveloperFeedback] = useState<string | null>(null)
   const [developerBotName, setDeveloperBotName] = useState('Mobile Bot')
   const [developerWebhookName, setDeveloperWebhookName] = useState('Mobile Hook')
+  const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null)
+  const [memberDrawerOpen, setMemberDrawerOpen] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchScope, setSearchScope] = useState<MobileSearchScope>('all')
   const activeChannel = selectedChannel(state)
   const activeServer = activeMobileServerConnection(state)
   const developerOrganizationId =
@@ -262,6 +273,11 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
   const pendingAttachments = pendingAttachmentsByChannelId[state.selectedChannelId] ?? []
   const timelineGroups = useMemo(() => mobileMessageTimelineGroups(state), [state])
   const permissionRows = useMemo(() => mobileMediaPermissionRows(state), [state])
+  const searchViewModel = useMemo(
+    () => mobileSearchViewModel(state, { query: searchQuery, scope: searchScope }),
+    [searchQuery, searchScope, state],
+  )
+  const memberRows = useMemo(() => mobileMemberRows(state), [state])
   const workspaceSections = useMemo(() => mobileWorkspaceNavigatorSections(state), [state])
   const selectedMeeting =
     meetings.find((meeting) => meeting.id === selectedMeetingId) ?? meetings[0] ?? null
@@ -1493,6 +1509,34 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
     dispatch({ type: 'channel.select', channelId: channel.id })
   }
 
+  function openMobileSearch() {
+    setMemberDrawerOpen(false)
+    setSearchOpen((current) => !current)
+  }
+
+  function openMobileMembers() {
+    setSearchOpen(false)
+    setMemberDrawerOpen((current) => !current)
+  }
+
+  function jumpToMobileMessage(messageId: string) {
+    const message = state.messages.find((candidate) => candidate.id === messageId)
+    if (!message) {
+      setChatFeedback('Message is no longer available.')
+      return
+    }
+
+    const routeTarget = mobileRouteTargetForMessage(state, messageId)
+    if (routeTarget) {
+      setMobileRouteTarget(routeTarget)
+    }
+    dispatch({ type: 'channel.select', channelId: message.channelId })
+    setHighlightedMessageId(messageId)
+    setMemberDrawerOpen(false)
+    setSearchOpen(false)
+    setChatFeedback(`Jumped to #${state.channels.find((channel) => channel.id === message.channelId)?.name ?? 'channel'}.`)
+  }
+
   function toggleVoiceSettings() {
     openMobileSettingsPanel('voice-video')
     setSettingsOpen((current) => !current)
@@ -2152,11 +2196,15 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
       <StatusBar backgroundColor="#151515" barStyle="light-content" />
       <MobileChatHeader
         channel={activeChannel}
+        memberDrawerOpen={memberDrawerOpen}
         onBack={() => dispatch({ type: 'channel.back' })}
+        onOpenMembers={openMobileMembers}
+        onOpenSearch={openMobileSearch}
         onOpenSettings={() => {
           openMobileSettingsPanel('account')
           setSettingsOpen(true)
         }}
+        searchOpen={searchOpen}
       />
       {settingsOpen ? (
         <MobileSettingsPanel
@@ -2221,12 +2269,35 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
           webhooks={developerWebhooks}
         />
       ) : null}
+      {searchOpen ? (
+        <MobileSearchPanel
+          onChangeQuery={setSearchQuery}
+          onChangeScope={setSearchScope}
+          onClose={() => setSearchOpen(false)}
+          onJumpToMessage={jumpToMobileMessage}
+          onOpenChannel={(channel) => {
+            setSearchOpen(false)
+            openMobileChannel(channel)
+          }}
+          query={searchQuery}
+          scope={searchScope}
+          viewModel={searchViewModel}
+        />
+      ) : null}
+      {memberDrawerOpen ? (
+        <MobileMemberDrawer
+          channelName={activeChannel.name}
+          members={memberRows}
+          onClose={() => setMemberDrawerOpen(false)}
+        />
+      ) : null}
       <FlatList
         data={timelineGroups}
         keyExtractor={(group) => group.id}
         renderItem={({ item }) => (
           <MessageGroup
             group={item}
+            highlightedMessageId={highlightedMessageId}
             onLongPress={(message) =>
               openMobileMessageActions({ channelId: message.channelId, messageId: message.id })
             }
@@ -2745,12 +2816,20 @@ function WorkspaceNavigator({
 
 function MobileChatHeader({
   channel,
+  memberDrawerOpen,
   onBack,
+  onOpenMembers,
+  onOpenSearch,
   onOpenSettings,
+  searchOpen,
 }: {
   channel: MobileChannel
+  memberDrawerOpen: boolean
   onBack: () => void
+  onOpenMembers: () => void
+  onOpenSearch: () => void
   onOpenSettings: () => void
+  searchOpen: boolean
 }) {
   return (
     <View style={styles.chatHeader}>
@@ -2764,8 +2843,18 @@ function MobileChatHeader({
         </Text>
       </View>
       <View style={styles.channelHeaderActions}>
-        <IconButton accessibilityLabel="Search messages" icon="⌕" onPress={() => undefined} />
-        <IconButton accessibilityLabel="Open members" icon="@" onPress={() => undefined} />
+        <IconButton
+          accessibilityLabel="Search messages"
+          active={searchOpen}
+          icon="⌕"
+          onPress={onOpenSearch}
+        />
+        <IconButton
+          accessibilityLabel="Open members"
+          active={memberDrawerOpen}
+          icon="@"
+          onPress={onOpenMembers}
+        />
         <IconButton accessibilityLabel="Open channel settings" icon="⚙" onPress={onOpenSettings} />
       </View>
     </View>
@@ -2774,10 +2863,12 @@ function MobileChatHeader({
 
 function IconButton({
   accessibilityLabel,
+  active = false,
   icon,
   onPress,
 }: {
   accessibilityLabel: string
+  active?: boolean
   icon: string
   onPress: () => void
 }) {
@@ -2786,7 +2877,7 @@ function IconButton({
       accessibilityLabel={accessibilityLabel}
       accessibilityRole="button"
       onPress={onPress}
-      style={styles.iconOnlyButton}
+      style={[styles.iconOnlyButton, active ? styles.activeIconOnlyButton : null]}
     >
       <Text style={styles.iconOnlyButtonText}>{icon}</Text>
     </Pressable>
@@ -2878,6 +2969,297 @@ function ChannelRow({
       </View>
     </Pressable>
   )
+}
+
+const mobileSearchScopeTabs: Array<{ label: string; scope: MobileSearchScope }> = [
+  { label: 'All', scope: 'all' },
+  { label: 'Channels', scope: 'channels' },
+  { label: 'Messages', scope: 'messages' },
+  { label: 'Mentions', scope: 'mentions' },
+]
+
+function MobileSearchPanel({
+  onChangeQuery,
+  onChangeScope,
+  onClose,
+  onJumpToMessage,
+  onOpenChannel,
+  query,
+  scope,
+  viewModel,
+}: {
+  onChangeQuery: (query: string) => void
+  onChangeScope: (scope: MobileSearchScope) => void
+  onClose: () => void
+  onJumpToMessage: (messageId: string) => void
+  onOpenChannel: (channel: Pick<MobileChannel, 'id' | 'kind'>) => void
+  query: string
+  scope: MobileSearchScope
+  viewModel: MobileSearchViewModel
+}) {
+  const showResults = viewModel.status === 'ready'
+
+  return (
+    <View style={styles.searchPanel}>
+      <View style={styles.sheetHeader}>
+        <View style={styles.actionSheetTitleBlock}>
+          <Text style={styles.sheetTitle}>Search</Text>
+          <Text style={styles.subtle}>{viewModel.message}</Text>
+        </View>
+        <Pressable accessibilityRole="button" onPress={onClose} style={styles.closeSheetButton}>
+          <Text style={styles.headerActionText}>Close</Text>
+        </Pressable>
+      </View>
+      <TextInput
+        accessibilityLabel="Search channels and messages"
+        autoCapitalize="none"
+        onChangeText={onChangeQuery}
+        placeholder={scope === 'mentions' ? 'Filter mentions' : 'Search #channels and messages'}
+        placeholderTextColor="#7f877d"
+        style={styles.searchInput}
+        value={query}
+      />
+      <ScrollView
+        horizontal
+        keyboardShouldPersistTaps="handled"
+        showsHorizontalScrollIndicator={false}
+        style={styles.searchTabs}
+      >
+        {mobileSearchScopeTabs.map((tab) => (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ selected: scope === tab.scope }}
+            key={tab.scope}
+            onPress={() => onChangeScope(tab.scope)}
+            style={[styles.searchTab, scope === tab.scope ? styles.activeSearchTab : null]}
+          >
+            <Text
+              style={[
+                styles.searchTabText,
+                scope === tab.scope ? styles.activeSearchTabText : null,
+              ]}
+            >
+              {tab.label}
+            </Text>
+          </Pressable>
+        ))}
+      </ScrollView>
+      <ScrollView
+        contentContainerStyle={styles.searchResultsContent}
+        keyboardShouldPersistTaps="handled"
+        style={styles.searchResults}
+      >
+        {!showResults ? (
+          <SearchStateRow status={viewModel.status} text={viewModel.message} />
+        ) : null}
+        {showResults && viewModel.channelResults.length > 0 ? (
+          <SearchResultSection title="Channels">
+            {viewModel.channelResults.map((result) => (
+              <Pressable
+                accessibilityRole="button"
+                key={result.channelId}
+                onPress={() =>
+                  onOpenChannel({ id: result.channelId, kind: result.channelKind })
+                }
+                style={styles.searchResultRow}
+              >
+                <Text style={styles.searchResultIcon}>
+                  {result.channelKind === 'voice' ? 'V' : '#'}
+                </Text>
+                <View style={styles.searchResultCopy}>
+                  <Text numberOfLines={1} style={styles.searchResultTitle}>
+                    {result.channelName}
+                  </Text>
+                  <Text numberOfLines={1} style={styles.subtle}>
+                    {result.topic || (result.channelKind === 'voice' ? 'Voice channel' : 'Text channel')}
+                  </Text>
+                </View>
+              </Pressable>
+            ))}
+          </SearchResultSection>
+        ) : null}
+        {showResults && viewModel.messageResults.length > 0 ? (
+          <SearchResultSection title="Messages">
+            {viewModel.messageResults.map((result) => (
+              <MessageSearchResultRow
+                key={result.messageId}
+                onPress={() => onJumpToMessage(result.messageId)}
+                prefix={`#${result.channelName}`}
+                result={result}
+              />
+            ))}
+          </SearchResultSection>
+        ) : null}
+        {showResults && viewModel.mentionResults.length > 0 ? (
+          <SearchResultSection title="Recent mentions">
+            {viewModel.mentionResults.map((result) => (
+              <MessageSearchResultRow
+                key={`mention-${result.messageId}`}
+                onPress={() => onJumpToMessage(result.messageId)}
+                prefix={result.mentionLabel}
+                result={result}
+              />
+            ))}
+          </SearchResultSection>
+        ) : null}
+      </ScrollView>
+    </View>
+  )
+}
+
+function SearchStateRow({
+  status,
+  text,
+}: {
+  status: MobileSearchViewModel['status']
+  text: string
+}) {
+  return (
+    <View style={styles.searchStateRow}>
+      <Text style={styles.searchStateIcon}>{searchStateIcon(status)}</Text>
+      <Text style={styles.searchStateText}>{text}</Text>
+    </View>
+  )
+}
+
+function SearchResultSection({
+  children,
+  title,
+}: {
+  children: ReactNode
+  title: string
+}) {
+  return (
+    <View style={styles.searchResultSection}>
+      <Text style={styles.sectionTitle}>{title}</Text>
+      {children}
+    </View>
+  )
+}
+
+function MessageSearchResultRow({
+  onPress,
+  prefix,
+  result,
+}: {
+  onPress: () => void
+  prefix: string
+  result: { authorName: string; excerpt: string; time: string }
+}) {
+  return (
+    <Pressable accessibilityRole="button" onPress={onPress} style={styles.searchResultRow}>
+      <Text style={styles.searchResultIcon}>↗</Text>
+      <View style={styles.searchResultCopy}>
+        <View style={styles.searchResultMetaRow}>
+          <Text numberOfLines={1} style={styles.searchResultTitle}>
+            {prefix}
+          </Text>
+          <Text style={styles.messageTime}>{result.time}</Text>
+        </View>
+        <Text numberOfLines={1} style={styles.subtle}>
+          {result.authorName}: {result.excerpt}
+        </Text>
+      </View>
+    </Pressable>
+  )
+}
+
+function searchStateIcon(status: MobileSearchViewModel['status']) {
+  switch (status) {
+    case 'idle':
+      return '⌕'
+    case 'loading':
+      return '…'
+    case 'error':
+      return '!'
+    case 'permission-denied':
+      return '×'
+    case 'empty':
+      return '0'
+    case 'ready':
+      return '✓'
+  }
+}
+
+function MobileMemberDrawer({
+  channelName,
+  members,
+  onClose,
+}: {
+  channelName: string
+  members: MobileMemberRow[]
+  onClose: () => void
+}) {
+  return (
+    <View style={styles.memberDrawer}>
+      <View style={styles.sheetHeader}>
+        <View style={styles.actionSheetTitleBlock}>
+          <Text style={styles.sheetTitle}>Members</Text>
+          <Text style={styles.subtle}>#{channelName} · {members.length} visible</Text>
+        </View>
+        <Pressable accessibilityRole="button" onPress={onClose} style={styles.closeSheetButton}>
+          <Text style={styles.headerActionText}>Close</Text>
+        </Pressable>
+      </View>
+      <ScrollView contentContainerStyle={styles.memberListContent} style={styles.memberList}>
+        {members.map((member) => (
+          <View key={member.id} style={styles.memberRow}>
+            <View style={styles.memberAvatar}>
+              <Text style={styles.memberAvatarText}>{initialsForLabel(member.displayName)}</Text>
+              <View style={[styles.presenceDot, presenceDotStyle(member.presence)]} />
+            </View>
+            <View style={styles.memberCopy}>
+              <View style={styles.memberNameRow}>
+                <Text numberOfLines={1} style={styles.memberName}>
+                  {member.displayName}
+                </Text>
+                {member.bot ? <Text style={styles.authorBadge}>BOT</Text> : null}
+                {member.self ? <Text style={styles.selfBadge}>YOU</Text> : null}
+              </View>
+              <Text numberOfLines={1} style={styles.subtle}>
+                {presenceLabel(member.presence)} · {member.activity}
+              </Text>
+            </View>
+            <Text style={styles.memberRole}>{member.role}</Text>
+          </View>
+        ))}
+      </ScrollView>
+    </View>
+  )
+}
+
+function presenceLabel(presence: MobileMemberRow['presence']) {
+  switch (presence) {
+    case 'speaking':
+      return 'Speaking'
+    case 'muted':
+      return 'Muted'
+    case 'deafened':
+      return 'Deafened'
+    case 'idle':
+      return 'Idle'
+    case 'offline':
+      return 'Offline'
+    case 'online':
+      return 'Online'
+  }
+}
+
+function presenceDotStyle(presence: MobileMemberRow['presence']) {
+  switch (presence) {
+    case 'speaking':
+      return styles.presenceSpeaking
+    case 'muted':
+      return styles.presenceMuted
+    case 'deafened':
+      return styles.presenceDeafened
+    case 'idle':
+      return styles.presenceIdle
+    case 'offline':
+      return styles.presenceOffline
+    case 'online':
+      return styles.presenceOnline
+  }
 }
 
 const mobileSettingsTabs: Array<{ panel: OpenCordSettingsPanel; label: string }> = [
@@ -3583,10 +3965,12 @@ function voiceSelfStatus(selfMute: boolean, selfDeaf: boolean) {
 
 function MessageGroup({
   group,
+  highlightedMessageId,
   onLongPress,
   onRetry,
 }: {
   group: MobileMessageTimelineGroup
+  highlightedMessageId: string | null
   onLongPress: (message: MobileMessage) => void
   onRetry: (messageId: string) => void
 }) {
@@ -3607,6 +3991,7 @@ function MessageGroup({
         </View>
         {group.messages.map((message) => (
           <MessageBubble
+            highlighted={message.id === highlightedMessageId}
             key={message.id}
             message={message}
             onLongPress={() => onLongPress(message)}
@@ -3619,10 +4004,12 @@ function MessageGroup({
 }
 
 function MessageBubble({
+  highlighted,
   message,
   onLongPress,
   onRetry,
 }: {
+  highlighted: boolean
   message: MobileMessage
   onLongPress: () => void
   onRetry: () => void
@@ -3632,7 +4019,11 @@ function MessageBubble({
       accessibilityLabel={`Message from ${message.authorName}`}
       accessibilityRole="button"
       onLongPress={onLongPress}
-      style={[styles.message, message.own ? styles.ownMessage : null]}
+      style={[
+        styles.message,
+        message.own ? styles.ownMessage : null,
+        highlighted ? styles.highlightedMessage : null,
+      ]}
     >
       {message.replyToMessageId ? (
         <Text style={styles.replyPreview}>Replying to {message.replyToMessageId}</Text>
@@ -5315,6 +5706,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     width: 32,
   },
+  activeIconOnlyButton: {
+    backgroundColor: '#1d2b28',
+    borderColor: '#28796d',
+    borderWidth: 1,
+  },
   iconOnlyButtonText: {
     color: '#dbdee1',
     fontSize: 18,
@@ -5344,6 +5740,214 @@ const styles = StyleSheet.create({
     gap: 4,
     justifyContent: 'flex-end',
     maxWidth: 116,
+  },
+  searchPanel: {
+    backgroundColor: '#171819',
+    borderBottomColor: '#2b2f2d',
+    borderBottomWidth: 1,
+    gap: 10,
+    maxHeight: 360,
+    padding: 12,
+  },
+  searchInput: {
+    backgroundColor: '#101112',
+    borderColor: '#333a36',
+    borderRadius: 8,
+    borderWidth: 1,
+    color: '#f5f6f3',
+    minHeight: 42,
+    paddingHorizontal: 12,
+  },
+  searchTabs: {
+    flexGrow: 0,
+  },
+  searchTab: {
+    alignItems: 'center',
+    backgroundColor: '#232428',
+    borderColor: '#232428',
+    borderRadius: 8,
+    borderWidth: 1,
+    justifyContent: 'center',
+    marginRight: 8,
+    minHeight: 34,
+    paddingHorizontal: 10,
+  },
+  activeSearchTab: {
+    backgroundColor: '#1d2b28',
+    borderColor: '#28796d',
+  },
+  searchTabText: {
+    color: '#d8ddd5',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  activeSearchTabText: {
+    color: '#86e0bb',
+  },
+  searchResults: {
+    maxHeight: 210,
+  },
+  searchResultsContent: {
+    gap: 10,
+  },
+  searchResultSection: {
+    gap: 6,
+  },
+  searchResultRow: {
+    alignItems: 'center',
+    backgroundColor: '#202124',
+    borderColor: '#2f3431',
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 10,
+    minHeight: 54,
+    padding: 10,
+  },
+  searchResultIcon: {
+    color: '#86e0bb',
+    fontSize: 16,
+    fontWeight: '900',
+    textAlign: 'center',
+    width: 22,
+  },
+  searchResultCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  searchResultTitle: {
+    color: '#f2f3f5',
+    flexShrink: 1,
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  searchResultMetaRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+    justifyContent: 'space-between',
+  },
+  searchStateRow: {
+    alignItems: 'center',
+    backgroundColor: '#202124',
+    borderColor: '#333a36',
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 10,
+    minHeight: 62,
+    padding: 12,
+  },
+  searchStateIcon: {
+    color: '#86e0bb',
+    fontSize: 16,
+    fontWeight: '900',
+    textAlign: 'center',
+    width: 22,
+  },
+  searchStateText: {
+    color: '#d8ddd5',
+    flex: 1,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  memberDrawer: {
+    backgroundColor: '#171819',
+    borderBottomColor: '#2b2f2d',
+    borderBottomWidth: 1,
+    gap: 10,
+    maxHeight: 360,
+    padding: 12,
+  },
+  memberList: {
+    maxHeight: 286,
+  },
+  memberListContent: {
+    gap: 8,
+  },
+  memberRow: {
+    alignItems: 'center',
+    backgroundColor: '#202124',
+    borderColor: '#2f3431',
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 10,
+    minHeight: 58,
+    padding: 10,
+  },
+  memberAvatar: {
+    alignItems: 'center',
+    backgroundColor: '#26312f',
+    borderRadius: 17,
+    height: 34,
+    justifyContent: 'center',
+    width: 34,
+  },
+  memberAvatarText: {
+    color: '#86e0bb',
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  presenceDot: {
+    borderColor: '#202124',
+    borderRadius: 5,
+    borderWidth: 2,
+    bottom: -1,
+    height: 11,
+    position: 'absolute',
+    right: -1,
+    width: 11,
+  },
+  presenceOnline: {
+    backgroundColor: '#3ba55d',
+  },
+  presenceSpeaking: {
+    backgroundColor: '#86e0bb',
+  },
+  presenceMuted: {
+    backgroundColor: '#d6a94a',
+  },
+  presenceDeafened: {
+    backgroundColor: '#d97b72',
+  },
+  presenceIdle: {
+    backgroundColor: '#faa61a',
+  },
+  presenceOffline: {
+    backgroundColor: '#747f8d',
+  },
+  memberCopy: {
+    flex: 1,
+    gap: 2,
+    minWidth: 0,
+  },
+  memberNameRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 6,
+  },
+  memberName: {
+    color: '#f2f3f5',
+    flexShrink: 1,
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  selfBadge: {
+    backgroundColor: '#28796d',
+    borderRadius: 4,
+    color: '#ffffff',
+    fontSize: 9,
+    fontWeight: '900',
+    overflow: 'hidden',
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+  },
+  memberRole: {
+    color: '#aab2a8',
+    fontSize: 11,
+    fontWeight: '900',
+    textTransform: 'uppercase',
   },
   headerActionButton: {
     alignItems: 'center',
@@ -5406,6 +6010,10 @@ const styles = StyleSheet.create({
     maxWidth: '100%',
     paddingHorizontal: 0,
     paddingVertical: 2,
+  },
+  highlightedMessage: {
+    backgroundColor: '#253430',
+    paddingHorizontal: 8,
   },
   ownMessage: {
     alignSelf: 'flex-start',

@@ -13,9 +13,12 @@ import {
   mobileMentionTokens,
   mobileMessageActionSheetOptions,
   mobileMessageTimelineGroups,
+  mobileMemberRows,
   mobileMediaPermissionRows,
   mobileReducer,
+  mobileRouteTargetForMessage,
   mobileRouteTargetForChannel,
+  mobileSearchViewModel,
   mobileWorkspaceNavigatorSections,
   mobilePushTokenRequest,
   mobileVoiceParticipantsForChannel,
@@ -206,6 +209,128 @@ describe('mobile app state', () => {
       channelId: 'backend',
     })
     expect(mobileRouteTargetForChannel(state, 'missing')).toBeNull()
+  })
+
+  it('creates shared route targets for mobile jump-to-message navigation', () => {
+    const state = createInitialMobileState()
+
+    expect(mobileRouteTargetForMessage(state, 'seed-2')).toEqual({
+      kind: 'message',
+      serverId: 'local-opencord',
+      organizationId: 'local',
+      spaceId: 'main',
+      channelId: 'backend',
+      messageId: 'seed-2',
+    })
+    expect(mobileRouteTargetForMessage(state, 'missing')).toBeNull()
+  })
+
+  it('builds mobile channel, message, and recent mention search models', () => {
+    const state = createInitialMobileState()
+
+    const channelSearch = mobileSearchViewModel(state, { query: 'back', scope: 'channels' })
+    expect(channelSearch).toMatchObject({
+      status: 'ready',
+      totalResults: 1,
+      channelResults: [
+        expect.objectContaining({
+          channelId: 'backend',
+          channelName: 'backend',
+        }),
+      ],
+    })
+
+    const messageSearch = mobileSearchViewModel(state, { query: 'deploy', scope: 'messages' })
+    expect(messageSearch.messageResults).toEqual([
+      expect.objectContaining({
+        authorName: 'Release Hook',
+        channelName: 'general',
+        messageId: 'seed-1',
+      }),
+    ])
+
+    const recentMentions = mobileSearchViewModel(state, { scope: 'mentions' })
+    expect(recentMentions).toMatchObject({
+      status: 'ready',
+      mentionResults: [
+        expect.objectContaining({
+          mentionLabel: '@OpenCord',
+          messageId: 'seed-mention-1',
+        }),
+      ],
+    })
+  })
+
+  it('models mobile search loading, empty, error, and denied states', () => {
+    const state = createInitialMobileState()
+
+    expect(mobileSearchViewModel(state).status).toBe('idle')
+    expect(mobileSearchViewModel(state, { query: 'missing', scope: 'messages' })).toMatchObject({
+      status: 'empty',
+      message: 'No results found.',
+    })
+    expect(
+      mobileSearchViewModel(state, {
+        availability: { status: 'loading', message: 'Searching server index...' },
+        query: 'deploy',
+      }),
+    ).toMatchObject({
+      status: 'loading',
+      message: 'Searching server index...',
+      totalResults: 0,
+    })
+    expect(
+      mobileSearchViewModel(state, {
+        availability: { status: 'error', message: 'Search index unavailable.' },
+        query: 'deploy',
+      }),
+    ).toMatchObject({
+      status: 'error',
+      message: 'Search index unavailable.',
+    })
+    expect(
+      mobileSearchViewModel(state, {
+        availability: { status: 'permission-denied', message: 'Search is disabled here.' },
+        query: 'deploy',
+      }),
+    ).toMatchObject({
+      status: 'permission-denied',
+      message: 'Search is disabled here.',
+    })
+  })
+
+  it('derives member drawer rows with presence and voice activity near chat', () => {
+    const loggedIn = mobileReducer(createInitialMobileState(), {
+      type: 'login.submit',
+      serverUrl: 'https://chat.example.com',
+      email: 'user@example.com',
+    })
+    const inGeneral = mobileReducer(loggedIn, { type: 'channel.select', channelId: 'general' })
+
+    const rows = mobileMemberRows(inGeneral)
+
+    expect(rows[0]).toMatchObject({
+      id: 'self',
+      displayName: 'user',
+      presence: 'online',
+      role: 'You',
+      self: true,
+    })
+    expect(rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          displayName: 'Mira',
+          presence: 'speaking',
+          activity: 'Speaking in #standup',
+          voiceChannelName: 'standup',
+        }),
+        expect.objectContaining({
+          bot: true,
+          displayName: 'OpenCord Bot',
+          role: 'Bot',
+        }),
+      ]),
+    )
   })
 
   it('adds local messages to the selected channel', () => {

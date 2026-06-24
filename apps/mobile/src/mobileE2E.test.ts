@@ -39,6 +39,7 @@ describe('mobile e2e launch config', () => {
       meetingTitle: null,
       password: '',
       preferredVoiceChannelName: null,
+      rememberDevice: true,
       runId: null,
       serverUrl: 'http://localhost:8080',
     })
@@ -56,6 +57,7 @@ describe('mobile e2e launch config', () => {
         meetingId: ' 019ef679-3187-7331-a2bd-aa8b5ade1e57 ',
         meetingTitle: ' OpenCord Local Alpha Standup ',
         preferredVoiceChannelName: ' Voice Lounge ',
+        rememberDevice: false,
         serverUrl: ' http://localhost:8080 ',
       }),
     ).toEqual({
@@ -68,6 +70,7 @@ describe('mobile e2e launch config', () => {
       meetingTitle: 'OpenCord Local Alpha Standup',
       password: 'correct horse battery staple',
       preferredVoiceChannelName: 'Voice Lounge',
+      rememberDevice: false,
       runId: null,
       serverUrl: 'http://localhost:8080',
     })
@@ -94,6 +97,7 @@ describe('mobile e2e launch config', () => {
           meetingTitle: null,
           password: 'correct horse battery staple',
           preferredVoiceChannelName: 'Voice Lounge',
+          rememberDevice: true,
           runId: 'oc-10-007',
           serverUrl: 'http://localhost:8080',
         },

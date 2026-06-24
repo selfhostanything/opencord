@@ -3,6 +3,7 @@ import type { FormEvent, RefObject } from 'react'
 import {
   createOpenCordApiClient,
   OpenCordApiError,
+  type AuthResult,
   type AuthUser,
   type Channel as ApiChannel,
   type IncomingWebhook,
@@ -512,6 +513,8 @@ export function WorkspaceShell({
   const [localAlphaEmail, setLocalAlphaEmail] = useState('alpha@example.com')
   const [localAlphaDisplayName, setLocalAlphaDisplayName] = useState('Alpha User')
   const [localAlphaPassword, setLocalAlphaPassword] = useState('')
+  const [localAlphaRememberDevice, setLocalAlphaRememberDevice] = useState(true)
+  const [localAlphaRememberedSession, setLocalAlphaRememberedSession] = useState(false)
   const [localAlphaUser, setLocalAlphaUser] = useState<AuthUser | null>(null)
   const [localAlphaSessionToken, setLocalAlphaSessionToken] = useState('')
   const [localAlphaOrganization, setLocalAlphaOrganization] = useState<Organization | null>(null)
@@ -590,6 +593,7 @@ export function WorkspaceShell({
 
     setLocalAlphaStatus('loading')
     setLocalAlphaError(null)
+    const rememberDevice = localAlphaRememberDevice
     try {
       const anonymousClient = createOpenCordApiClient({
         baseUrl: activeConnection.baseUrl,
@@ -600,8 +604,14 @@ export function WorkspaceShell({
         email,
         displayName,
         password,
+        rememberDevice,
       )
-      await persistLocalAlphaDeviceSession(activeConnection.baseUrl, authResult)
+      if (rememberDevice) {
+        await persistLocalAlphaDeviceSession(activeConnection.baseUrl, authResult)
+      } else {
+        clearLocalAlphaSession()
+        await clearLocalAlphaDeviceSession(activeConnection.baseUrl)
+      }
       const client = createOpenCordApiClient({
         baseUrl: activeConnection.baseUrl,
         sessionToken: authResult.session.token,
@@ -610,6 +620,7 @@ export function WorkspaceShell({
         client,
         displayName,
         email,
+        rememberedSession: rememberDevice,
         reconnectVoiceChannelId: null,
         sessionToken: authResult.session.token,
         user: authResult.user,
@@ -629,6 +640,7 @@ export function WorkspaceShell({
     try {
       const authResult = await refreshLocalAlphaDeviceSession(snapshot.baseUrl)
       await persistLocalAlphaDeviceSession(snapshot.baseUrl, authResult)
+      setLocalAlphaRememberDevice(true)
       const client = createOpenCordApiClient({
         baseUrl: snapshot.baseUrl,
         sessionToken: authResult.session.token,
@@ -637,6 +649,7 @@ export function WorkspaceShell({
         client,
         displayName: authResult.user.displayName,
         email: authResult.user.email,
+        rememberedSession: true,
         reconnectVoiceChannelId: snapshot.reconnectVoiceChannelId,
         sessionToken: authResult.session.token,
         user: authResult.user,
@@ -666,7 +679,7 @@ export function WorkspaceShell({
 
   async function persistLocalAlphaDeviceSession(
     baseUrl: string,
-    authResult: Awaited<ReturnType<ReturnType<typeof createOpenCordApiClient>['login']>>,
+    authResult: AuthResult,
   ) {
     const desktopStores = desktopDeviceSessionStores()
     if (!desktopStores || !authResult.session.refreshToken) {
@@ -695,6 +708,7 @@ export function WorkspaceShell({
     client,
     displayName,
     email,
+    rememberedSession,
     reconnectVoiceChannelId,
     sessionToken,
     user,
@@ -702,6 +716,7 @@ export function WorkspaceShell({
     client: ReturnType<typeof createOpenCordApiClient>
     displayName: string
     email: string
+    rememberedSession: boolean
     reconnectVoiceChannelId: string | null
     sessionToken: string
     user: AuthUser
@@ -723,17 +738,22 @@ export function WorkspaceShell({
       selfDeaf: false,
       participants: [],
     })
-    saveLocalAlphaSession({
-      baseUrl: activeConnection.baseUrl,
-      displayName,
-      email,
-      organization: workspace.organization,
-      reconnectVoiceChannelId,
-      user,
-    })
+    if (rememberedSession) {
+      saveLocalAlphaSession({
+        baseUrl: activeConnection.baseUrl,
+        displayName,
+        email,
+        organization: workspace.organization,
+        reconnectVoiceChannelId,
+        user,
+      })
+    } else {
+      clearLocalAlphaSession()
+    }
 
     setLocalAlphaUser(user)
     setLocalAlphaSessionToken(sessionToken)
+    setLocalAlphaRememberedSession(rememberedSession)
     setLocalAlphaOrganization(workspace.organization)
     setSpaces([spaceFromApi(workspace.space)])
     setChannels(workspace.channels.map(channelFromApi))
@@ -753,7 +773,12 @@ export function WorkspaceShell({
   }
 
   function persistLocalAlphaSession(reconnectVoiceChannelId: string | null) {
-    if (!localAlphaSessionToken || !localAlphaUser || !localAlphaOrganization) {
+    if (
+      !localAlphaRememberedSession ||
+      !localAlphaSessionToken ||
+      !localAlphaUser ||
+      !localAlphaOrganization
+    ) {
       return
     }
 
@@ -772,12 +797,13 @@ export function WorkspaceShell({
     email: string,
     displayName: string,
     password: string,
+    rememberDevice: boolean,
   ) {
     try {
-      return await client.register({ email, displayName, password })
+      return await client.register({ email, displayName, password, rememberDevice })
     } catch (error) {
       if (error instanceof OpenCordApiError && error.status === 409) {
-        return client.login({ email, password })
+        return client.login({ email, password, rememberDevice })
       }
       throw error
     }
@@ -2131,6 +2157,14 @@ export function WorkspaceShell({
             value={localAlphaPassword}
             onChange={(event) => setLocalAlphaPassword(event.target.value)}
           />
+          <label className="remember-device-row">
+            <input
+              checked={localAlphaRememberDevice}
+              onChange={(event) => setLocalAlphaRememberDevice(event.target.checked)}
+              type="checkbox"
+            />
+            <span>Remember this device</span>
+          </label>
           <button type="submit" disabled={localAlphaStatus === 'loading'}>
             {localAlphaStatus === 'loading' ? 'Starting' : 'Start local alpha'}
           </button>

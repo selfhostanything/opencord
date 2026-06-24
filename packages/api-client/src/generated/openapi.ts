@@ -5900,11 +5900,15 @@ export interface components {
             email: string;
             display_name: string;
             password: string;
+            /** @description Defaults to true. When false, the server returns JSON session tokens but clears the persistent browser refresh cookie so the client stays session-only. */
+            remember_device?: boolean;
         };
         LoginRequest: {
             /** Format: email */
             email: string;
             password: string;
+            /** @description Defaults to true. When false, the server returns JSON session tokens but clears the persistent browser refresh cookie so the client stays session-only. */
+            remember_device?: boolean;
         };
         RefreshSessionRequest: {
             refresh_token: string;

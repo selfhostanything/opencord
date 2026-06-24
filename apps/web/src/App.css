@@ -238,6 +238,22 @@ button {
   margin-bottom: 10px;
 }
 
+.local-alpha-form label.remember-device-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  color: #d8ddd5;
+  font-size: 12px;
+}
+
+.local-alpha-form label.remember-device-row input {
+  width: auto;
+  min-height: auto;
+  margin: 0;
+  accent-color: #28796d;
+}
+
 .server-form button,
 .local-alpha-form button,
 .channel-form button,

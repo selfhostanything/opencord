@@ -59,11 +59,13 @@ export type RegisterRequest = {
   email: string
   displayName: string
   password: string
+  rememberDevice?: boolean
 }
 
 export type LoginRequest = {
   email: string
   password: string
+  rememberDevice?: boolean
 }
 
 export type RefreshSessionRequest = {
@@ -889,6 +891,7 @@ export class OpenCordApiClient {
         email: request.email,
         display_name: request.displayName,
         password: request.password,
+        remember_device: request.rememberDevice,
       }),
       method: 'POST',
     })
@@ -901,6 +904,7 @@ export class OpenCordApiClient {
       body: JSON.stringify({
         email: request.email,
         password: request.password,
+        remember_device: request.rememberDevice,
       }),
       method: 'POST',
     })

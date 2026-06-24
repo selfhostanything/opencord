@@ -493,6 +493,79 @@ describe('OpenCord API client', () => {
     })
   })
 
+  it('sends remember-device choices for login and registration', async () => {
+    const fetchMock = vi
+      .fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          user: {
+            id: '01973f83-f22a-73ba-ae76-5a045c52fc90',
+            email: 'alpha@example.com',
+            display_name: 'Alpha User',
+          },
+          session: {
+            token: 'session-token',
+            refresh_token: 'refresh-token',
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          user: {
+            id: '01973f83-f22a-73ba-ae76-5a045c52fc90',
+            email: 'alpha@example.com',
+            display_name: 'Alpha User',
+          },
+          session: {
+            token: 'session-token',
+            refresh_token: 'refresh-token',
+          },
+        }),
+      )
+    const client = createOpenCordApiClient({
+      baseUrl: 'https://chat.example.com',
+      fetch: fetchMock,
+    })
+
+    await client.register({
+      displayName: 'Alpha User',
+      email: 'alpha@example.com',
+      password: 'correct horse battery staple',
+      rememberDevice: false,
+    })
+    await client.login({
+      email: 'alpha@example.com',
+      password: 'correct horse battery staple',
+      rememberDevice: false,
+    })
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, 'https://chat.example.com/auth/register', {
+      body: JSON.stringify({
+        email: 'alpha@example.com',
+        display_name: 'Alpha User',
+        password: 'correct horse battery staple',
+        remember_device: false,
+      }),
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      method: 'POST',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(2, 'https://chat.example.com/auth/login', {
+      body: JSON.stringify({
+        email: 'alpha@example.com',
+        password: 'correct horse battery staple',
+        remember_device: false,
+      }),
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      method: 'POST',
+    })
+  })
+
   it('preserves rich message fields from the server payload', async () => {
     const fetchMock = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>()
     fetchMock.mockResolvedValue(

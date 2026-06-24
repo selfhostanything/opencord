@@ -93,6 +93,7 @@ type OpenCordMobileAppProps = {
 type MobileLoginCredentials = {
   email: string
   password: string
+  rememberDevice?: boolean
   serverUrl: string
 }
 
@@ -142,6 +143,7 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
   const [serverUrl, setServerUrl] = useState(state.serverUrl)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [rememberDevice, setRememberDevice] = useState(true)
   const [loginError, setLoginError] = useState<string | null>(null)
   const [loginStatus, setLoginStatus] = useState<'idle' | 'loading'>('idle')
   const [chatFeedback, setChatFeedback] = useState<string | null>(null)
@@ -266,6 +268,7 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
     setServerUrl(e2eLaunchConfig.serverUrl)
     setEmail(e2eLaunchConfig.email)
     setPassword(e2eLaunchConfig.password)
+    setRememberDevice(e2eLaunchConfig.rememberDevice)
     if (e2eLaunchConfig.demoWorkspace) {
       dispatch({
         type: 'login.submit',
@@ -489,6 +492,7 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
     const loginServerUrl = credentials?.serverUrl ?? serverUrl
     const loginEmail = credentials?.email ?? email
     const loginPassword = credentials?.password ?? password
+    const loginRememberDevice = credentials?.rememberDevice ?? rememberDevice
 
     if (!loginEmail.trim() || !loginPassword) {
       setLoginError('Email and password are required.')
@@ -499,8 +503,16 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
     setLoginError(null)
     try {
       const authClient = createOpenCordApiClient({ baseUrl: loginServerUrl })
-      const authResult = await authClient.login({ email: loginEmail, password: loginPassword })
-      await persistMobileDeviceSession(loginServerUrl, authResult)
+      const authResult = await authClient.login({
+        email: loginEmail,
+        password: loginPassword,
+        rememberDevice: loginRememberDevice,
+      })
+      if (loginRememberDevice) {
+        await persistMobileDeviceSession(loginServerUrl, authResult)
+      } else {
+        await clearActiveDeviceSession(mobileDeviceSessionStoresRef.current, loginServerUrl)
+      }
       const client = createOpenCordApiClient({
         baseUrl: loginServerUrl,
         sessionToken: authResult.session.token,
@@ -921,6 +933,26 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
             style={styles.input}
             value={password}
           />
+          <Pressable
+            accessibilityLabel="Remember this device"
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: rememberDevice }}
+            onPress={() => setRememberDevice((current) => !current)}
+            style={styles.rememberDeviceRow}
+          >
+            <View
+              style={[
+                styles.rememberDeviceBox,
+                rememberDevice ? styles.rememberDeviceBoxChecked : null,
+              ]}
+            >
+              {rememberDevice ? <Text style={styles.rememberDeviceCheck}>on</Text> : null}
+            </View>
+            <View style={styles.rememberDeviceCopy}>
+              <Text style={styles.rememberDeviceLabel}>Remember this device</Text>
+              <Text style={styles.subtle}>Reopen without logging in on this phone.</Text>
+            </View>
+          </Pressable>
           {loginError ? <Text style={styles.errorText}>{loginError}</Text> : null}
           <Pressable
             accessibilityRole="button"
@@ -1997,6 +2029,39 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     color: '#f5f6f3',
     paddingHorizontal: 14,
+  },
+  rememberDeviceRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 10,
+    minHeight: 44,
+  },
+  rememberDeviceBox: {
+    alignItems: 'center',
+    borderColor: '#4a514c',
+    borderRadius: 6,
+    borderWidth: 1,
+    height: 28,
+    justifyContent: 'center',
+    width: 42,
+  },
+  rememberDeviceBoxChecked: {
+    backgroundColor: '#28796d',
+    borderColor: '#28796d',
+  },
+  rememberDeviceCheck: {
+    color: '#ffffff',
+    fontSize: 11,
+    fontWeight: '900',
+  },
+  rememberDeviceCopy: {
+    flex: 1,
+    gap: 2,
+  },
+  rememberDeviceLabel: {
+    color: '#f5f6f3',
+    fontSize: 14,
+    fontWeight: '800',
   },
   serverList: {
     gap: 8,

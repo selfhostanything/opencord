@@ -192,6 +192,7 @@ describe('OpenCord web chat UI', () => {
 
     await userEvent.clear(screen.getByLabelText('Local alpha email'))
     await userEvent.type(screen.getByLabelText('Local alpha email'), 'alpha@example.com')
+    await userEvent.clear(screen.getByLabelText('Local alpha display name'))
     await userEvent.type(screen.getByLabelText('Local alpha display name'), 'Alpha User')
     await userEvent.type(screen.getByLabelText('Local alpha password'), 'correct horse battery staple')
     await userEvent.click(screen.getByRole('button', { name: 'Start local alpha' }))
@@ -226,9 +227,182 @@ describe('OpenCord web chat UI', () => {
         method: 'POST',
       }),
     )
+    const registerCall = fetchMock.mock.calls.find(([input]) =>
+      input.toString().endsWith('/auth/register'),
+    )
+    expect(registerCall?.[1]).toEqual(
+      expect.objectContaining({
+        body: JSON.stringify({
+          email: 'alpha@example.com',
+          display_name: 'Alpha User',
+          password: 'correct horse battery staple',
+          remember_device: true,
+        }),
+      }),
+    )
     expect(window.localStorage.getItem('opencord.localAlphaSession:v1')).not.toContain(
       'session-token',
     )
+  })
+
+  it('can keep local alpha login session-only when remember device is unchecked', async () => {
+    const channelId = '01973f83-f22a-73ba-ae76-5a045c52fc93'
+    const desktopSecrets = new Map<string, string>()
+    const desktopWindow = window as Window & {
+      openCordDesktop?: {
+        deviceSessions: {
+          getSecret(key: string): Promise<string | null>
+          removeSecret(key: string): Promise<boolean>
+          setSecret(key: string, value: string): Promise<boolean>
+        }
+        platform: string
+      }
+    }
+    desktopWindow.openCordDesktop = {
+      deviceSessions: {
+        async getSecret(key) {
+          return desktopSecrets.get(key) ?? null
+        },
+        async removeSecret(key) {
+          desktopSecrets.delete(key)
+          return true
+        },
+        async setSecret(key, value) {
+          desktopSecrets.set(key, value)
+          return true
+        },
+      },
+      platform: 'darwin',
+    }
+    await persistDeviceSession(
+      {
+        metadata: window.localStorage,
+        secrets: {
+          getItem: (key: string) => desktopWindow.openCordDesktop!.deviceSessions.getSecret(key),
+          removeItem: (key: string) =>
+            desktopWindow.openCordDesktop!.deviceSessions.removeSecret(key).then(() => undefined),
+          setItem: (key: string, value: string) =>
+            desktopWindow.openCordDesktop!.deviceSessions.setSecret(key, value).then(() => undefined),
+        },
+      },
+      {
+        accountEmail: 'alpha@example.com',
+        displayName: 'Alpha User',
+        refreshToken: 'old-desktop-refresh-token',
+        serverUrl: 'http://localhost:8080',
+        userId: '01973f83-f22a-73ba-ae76-5a045c52fc90',
+      },
+    )
+
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input.toString()
+      if (url.endsWith('/healthz')) {
+        return new Response(JSON.stringify({ status: 'ok', version: 'test-version' }))
+      }
+      if (url.endsWith('/auth/register')) {
+        return new Response(
+          JSON.stringify({
+            user: {
+              id: '01973f83-f22a-73ba-ae76-5a045c52fc90',
+              email: 'alpha@example.com',
+              display_name: 'Alpha User',
+            },
+            session: {
+              token: 'session-token',
+              refresh_token: 'new-refresh-token',
+            },
+          }),
+          { status: 201 },
+        )
+      }
+      if (url.endsWith('/organizations')) {
+        return new Response(
+          JSON.stringify({
+            organization: {
+              id: '01973f83-f22a-73ba-ae76-5a045c52fc91',
+              name: 'Alpha Org',
+              slug: 'alpha-org',
+            },
+            membership: { role: 'owner', status: 'active' },
+          }),
+          { status: 201 },
+        )
+      }
+      if (url.endsWith('/organizations/01973f83-f22a-73ba-ae76-5a045c52fc91/spaces')) {
+        return new Response(
+          JSON.stringify({
+            space: {
+              id: '01973f83-f22a-73ba-ae76-5a045c52fc92',
+              organization_id: '01973f83-f22a-73ba-ae76-5a045c52fc91',
+              name: 'Alpha Space',
+              slug: 'alpha-space',
+            },
+            membership: { role: 'owner', status: 'active' },
+          }),
+          { status: 201 },
+        )
+      }
+      if (url.endsWith('/spaces/01973f83-f22a-73ba-ae76-5a045c52fc92/channels')) {
+        return new Response(
+          JSON.stringify({
+            channel: {
+              id: channelId,
+              organization_id: '01973f83-f22a-73ba-ae76-5a045c52fc91',
+              space_id: '01973f83-f22a-73ba-ae76-5a045c52fc92',
+              kind: 'text',
+              name: 'general',
+              slug: 'general',
+              topic: 'Local alpha chat',
+              position: 0,
+              is_private: false,
+              archived_at: null,
+            },
+          }),
+          { status: 201 },
+        )
+      }
+      if (url.endsWith(`/channels/${channelId}/messages`) && init?.method === undefined) {
+        return new Response(JSON.stringify({ messages: [] }))
+      }
+      if (
+        url.endsWith('/organizations/01973f83-f22a-73ba-ae76-5a045c52fc91/meetings') &&
+        init?.method === undefined
+      ) {
+        return new Response(JSON.stringify({ meetings: [] }))
+      }
+
+      throw new Error(`Unexpected fetch ${url}`)
+    })
+
+    render(<App />)
+
+    await userEvent.clear(screen.getByLabelText('Local alpha email'))
+    await userEvent.type(screen.getByLabelText('Local alpha email'), 'alpha@example.com')
+    await userEvent.clear(screen.getByLabelText('Local alpha display name'))
+    await userEvent.type(screen.getByLabelText('Local alpha display name'), 'Alpha User')
+    await userEvent.type(screen.getByLabelText('Local alpha password'), 'correct horse battery staple')
+    await userEvent.click(screen.getByLabelText('Remember this device'))
+    await userEvent.click(screen.getByRole('button', { name: 'Start local alpha' }))
+
+    expect(await screen.findByRole('heading', { name: '# general' })).toBeInTheDocument()
+    const registerCall = fetchMock.mock.calls.find(([input]) =>
+      input.toString().endsWith('/auth/register'),
+    )
+    expect(registerCall?.[1]).toEqual(
+      expect.objectContaining({
+        body: JSON.stringify({
+          email: 'alpha@example.com',
+          display_name: 'Alpha User',
+          password: 'correct horse battery staple',
+          remember_device: false,
+        }),
+      }),
+    )
+    expect(window.localStorage.getItem('opencord.localAlphaSession:v1')).toBeNull()
+    expect(JSON.stringify(Object.fromEntries(desktopSecrets))).not.toContain(
+      'old-desktop-refresh-token',
+    )
+    expect(JSON.stringify(Object.fromEntries(desktopSecrets))).not.toContain('new-refresh-token')
   })
 
   it('silently restores a local alpha session through refresh credentials without saved bearer token', async () => {

@@ -147,6 +147,12 @@ describe('mobile e2e launch config', () => {
     expect(mobileE2ECommandFromUrl('opencord-e2e://media/mute')).toBe('mute')
     expect(mobileE2ECommandFromUrl('opencord-e2e://media/deaf?source=phase10')).toBe('deaf')
     expect(mobileE2ECommandFromUrl('opencord-e2e://media/leave#done')).toBe('leave')
+    expect(mobileE2ECommandFromUrl('opencord-e2e://media/screen-share/start')).toBe(
+      'screenShareStart',
+    )
+    expect(mobileE2ECommandFromUrl('opencord-e2e://media/screen-share/stop')).toBe(
+      'screenShareStop',
+    )
     expect(mobileE2ECommandFromUrl('opencord://media/leave')).toBeNull()
     expect(mobileE2ECommandFromUrl('opencord-e2e://settings')).toBeNull()
   })
@@ -155,6 +161,8 @@ describe('mobile e2e launch config', () => {
     expect(normalizeMobileE2ECommand('mute')).toBe('mute')
     expect(normalizeMobileE2ECommand('deaf')).toBe('deaf')
     expect(normalizeMobileE2ECommand('leave')).toBe('leave')
+    expect(normalizeMobileE2ECommand('screenShareStart')).toBe('screenShareStart')
+    expect(normalizeMobileE2ECommand('screenShareStop')).toBe('screenShareStop')
     expect(normalizeMobileE2ECommand('media/mute')).toBeNull()
     expect(normalizeMobileE2ECommand(undefined)).toBeNull()
   })

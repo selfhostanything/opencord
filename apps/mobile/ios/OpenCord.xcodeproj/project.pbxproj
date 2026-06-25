@@ -9,6 +9,8 @@
 /* Begin PBXBuildFile section */
 		0C1005010000000000000001 /* OpenCordCallControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C1005010000000000000003 /* OpenCordCallControls.swift */; };
 		0C1005010000000000000002 /* OpenCordCallControls.m in Sources */ = {isa = PBXBuildFile; fileRef = 0C1005010000000000000004 /* OpenCordCallControls.m */; };
+		0C2000000000000000000001 /* SampleHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C2000000000000000000003 /* SampleHandler.swift */; };
+		0C2000000000000000000002 /* ScreenShareExtension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 0C2000000000000000000006 /* ScreenShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		0C80B921A6F3F58F76C31292 /* libPods-OpenCord.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 5DCACB8F33CDC322A6C60F78 /* libPods-OpenCord.a */; };
 		13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB51A68108700A75B9A /* Images.xcassets */; };
 		761780ED2CA45674006654EE /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 761780EC2CA45674006654EE /* AppDelegate.swift */; };
@@ -16,9 +18,38 @@
 		EF71ABDEA25518FD1EDAAAD7 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB81A68108700A75B9A /* PrivacyInfo.xcprivacy */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		0C2000000000000000000011 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 83CBB9F71A601CBA00E9B192 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 0C200000000000000000000B;
+			remoteInfo = ScreenShareExtension;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		0C200000000000000000000F /* Embed App Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				0C2000000000000000000002 /* ScreenShareExtension.appex in Embed App Extensions */,
+			);
+			name = "Embed App Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
 		0C1005010000000000000003 /* OpenCordCallControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = OpenCordCallControls.swift; path = OpenCord/OpenCordCallControls.swift; sourceTree = "<group>"; };
 		0C1005010000000000000004 /* OpenCordCallControls.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = OpenCordCallControls.m; path = OpenCord/OpenCordCallControls.m; sourceTree = "<group>"; };
+		0C1005010000000000000005 /* OpenCord.entitlements */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.entitlements; name = OpenCord.entitlements; path = OpenCord/OpenCord.entitlements; sourceTree = "<group>"; };
+		0C2000000000000000000003 /* SampleHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SampleHandler.swift; path = OpenCordScreenShareExtension/SampleHandler.swift; sourceTree = "<group>"; };
+		0C2000000000000000000004 /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = Info.plist; path = OpenCordScreenShareExtension/Info.plist; sourceTree = "<group>"; };
+		0C2000000000000000000005 /* OpenCordScreenShareExtension.entitlements */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.entitlements; name = OpenCordScreenShareExtension.entitlements; path = OpenCordScreenShareExtension/OpenCordScreenShareExtension.entitlements; sourceTree = "<group>"; };
+		0C2000000000000000000006 /* ScreenShareExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ScreenShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		13B07F961A680F5B00A75B9A /* OpenCord.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = OpenCord.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		13B07FB51A68108700A75B9A /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Images.xcassets; path = OpenCord/Images.xcassets; sourceTree = "<group>"; };
 		13B07FB61A68108700A75B9A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = Info.plist; path = OpenCord/Info.plist; sourceTree = "<group>"; };
@@ -43,6 +74,16 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		0C2000000000000000000007 /* OpenCordScreenShareExtension */ = {
+			isa = PBXGroup;
+			children = (
+				0C2000000000000000000003 /* SampleHandler.swift */,
+				0C2000000000000000000004 /* Info.plist */,
+				0C2000000000000000000005 /* OpenCordScreenShareExtension.entitlements */,
+			);
+			name = OpenCordScreenShareExtension;
+			sourceTree = "<group>";
+		};
 		13B07FAE1A68108700A75B9A /* OpenCord */ = {
 			isa = PBXGroup;
 			children = (
@@ -50,6 +91,7 @@
 				761780EC2CA45674006654EE /* AppDelegate.swift */,
 				0C1005010000000000000003 /* OpenCordCallControls.swift */,
 				0C1005010000000000000004 /* OpenCordCallControls.m */,
+				0C1005010000000000000005 /* OpenCord.entitlements */,
 				13B07FB61A68108700A75B9A /* Info.plist */,
 				81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */,
 				13B07FB81A68108700A75B9A /* PrivacyInfo.xcprivacy */,
@@ -77,6 +119,7 @@
 			isa = PBXGroup;
 			children = (
 				13B07FAE1A68108700A75B9A /* OpenCord */,
+				0C2000000000000000000007 /* OpenCordScreenShareExtension */,
 				832341AE1AAA6A7D00B99B32 /* Libraries */,
 				83CBBA001A601CBA00E9B192 /* Products */,
 				2D16E6871FA4F8E400B85C8A /* Frameworks */,
@@ -91,6 +134,7 @@
 			isa = PBXGroup;
 			children = (
 				13B07F961A680F5B00A75B9A /* OpenCord.app */,
+				0C2000000000000000000006 /* ScreenShareExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -115,6 +159,7 @@
 				13B07F871A680F5B00A75B9A /* Sources */,
 				13B07F8C1A680F5B00A75B9A /* Frameworks */,
 				13B07F8E1A680F5B00A75B9A /* Resources */,
+				0C200000000000000000000F /* Embed App Extensions */,
 				00DD1BFF1BD5951E006B06BC /* Bundle React Native code and images */,
 				00EEFC60759A1932668264C0 /* [CP] Embed Pods Frameworks */,
 				E235C05ADACE081382539298 /* [CP] Copy Pods Resources */,
@@ -122,11 +167,27 @@
 			buildRules = (
 			);
 			dependencies = (
+				0C2000000000000000000010 /* PBXTargetDependency */,
 			);
 			name = OpenCord;
 			productName = OpenCord;
 			productReference = 13B07F961A680F5B00A75B9A /* OpenCord.app */;
 			productType = "com.apple.product-type.application";
+		};
+		0C200000000000000000000B /* ScreenShareExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 0C200000000000000000000C /* Build configuration list for PBXNativeTarget "ScreenShareExtension" */;
+			buildPhases = (
+				0C2000000000000000000008 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ScreenShareExtension;
+			productName = ScreenShareExtension;
+			productReference = 0C2000000000000000000006 /* ScreenShareExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -137,6 +198,9 @@
 				LastUpgradeCheck = 1210;
 				TargetAttributes = {
 					13B07F861A680F5B00A75B9A = {
+						LastSwiftMigration = 1120;
+					};
+					0C200000000000000000000B = {
 						LastSwiftMigration = 1120;
 					};
 				};
@@ -155,6 +219,7 @@
 			projectRoot = "";
 			targets = (
 				13B07F861A680F5B00A75B9A /* OpenCord */,
+				0C200000000000000000000B /* ScreenShareExtension */,
 			);
 		};
 /* End PBXProject section */
@@ -258,7 +323,23 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		0C2000000000000000000008 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0C2000000000000000000001 /* SampleHandler.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		0C2000000000000000000010 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 0C200000000000000000000B /* ScreenShareExtension */;
+			targetProxy = 0C2000000000000000000011 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		13B07F941A680F5B00A75B9A /* Debug */ = {
@@ -267,6 +348,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_ENTITLEMENTS = OpenCord/OpenCord.entitlements;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_BITCODE = NO;
 				INFOPLIST_FILE = OpenCord/Info.plist;
@@ -297,6 +379,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_ENTITLEMENTS = OpenCord/OpenCord.entitlements;
 				CURRENT_PROJECT_VERSION = 1;
 				INFOPLIST_FILE = OpenCord/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
@@ -316,6 +399,55 @@
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				VERSIONING_SYSTEM = "apple-generic";
+			};
+			name = Release;
+		};
+		0C200000000000000000000D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = OpenCordScreenShareExtension/OpenCordScreenShareExtension.entitlements;
+				CURRENT_PROJECT_VERSION = 1;
+				INFOPLIST_FILE = OpenCordScreenShareExtension/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.opencord.ScreenShareExtension;
+				PRODUCT_BUNDLE_PACKAGE_TYPE = "XPC!";
+				PRODUCT_NAME = ScreenShareExtension;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		0C200000000000000000000E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = OpenCordScreenShareExtension/OpenCordScreenShareExtension.entitlements;
+				CURRENT_PROJECT_VERSION = 1;
+				INFOPLIST_FILE = OpenCordScreenShareExtension/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.opencord.ScreenShareExtension;
+				PRODUCT_BUNDLE_PACKAGE_TYPE = "XPC!";
+				PRODUCT_NAME = ScreenShareExtension;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Release;
 		};
@@ -485,6 +617,15 @@
 			buildConfigurations = (
 				13B07F941A680F5B00A75B9A /* Debug */,
 				13B07F951A680F5B00A75B9A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		0C200000000000000000000C /* Build configuration list for PBXNativeTarget "ScreenShareExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				0C200000000000000000000D /* Debug */,
+				0C200000000000000000000E /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

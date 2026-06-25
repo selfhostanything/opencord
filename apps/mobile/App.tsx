@@ -1,6 +1,16 @@
-import { useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react'
+import {
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+  type ComponentType,
+  type ReactNode,
+  type Ref,
+} from 'react'
 import {
   FlatList,
+  findNodeHandle,
   Image,
   Linking,
   Platform,
@@ -22,7 +32,7 @@ import {
   types as documentPickerTypes,
   type DocumentPickerResponse,
 } from '@react-native-documents/picker'
-import { RTCView } from '@livekit/react-native-webrtc'
+import { RTCView, ScreenCapturePickerView } from '@livekit/react-native-webrtc'
 import Clipboard from '@react-native-clipboard/clipboard'
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context'
 import {
@@ -104,6 +114,8 @@ import {
   useMobileMeetingsStore,
   useMobileSessionStore,
   useMobileSettingsStore,
+  useMobileVoiceStore,
+  type MobileVoiceScreenSharePublisher,
   type MobileMeetingForm,
   type MobilePendingAttachment,
 } from './src/mobileStores'
@@ -122,6 +134,7 @@ import {
 } from './src/mobileE2E'
 import {
   connectNativeLiveKitVoice,
+  type NativeLiveKitVoiceState,
   type NativeLiveKitVoiceSession,
 } from './src/nativeMedia'
 import {
@@ -143,6 +156,10 @@ type MobileLoginCredentials = {
 }
 
 const REMEMBER_DEVICE_SWITCH_TRACK_COLOR = { false: '#4a514c', true: '#28796d' }
+const NativeScreenCapturePickerView = ScreenCapturePickerView as ComponentType<{
+  ref?: Ref<unknown>
+  style?: object
+}>
 
 export default function App({ initialE2EConfig }: OpenCordMobileAppProps = {}) {
   return (
@@ -177,6 +194,7 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
   const lastE2EStateSignatureRef = useRef<string | null>(null)
   const lastE2ECommandIdRef = useRef<string | null>(null)
   const voiceSessionRef = useRef<NativeLiveKitVoiceSession | null>(null)
+  const screenCapturePickerRef = useRef<unknown>(null)
   const stateRef = useRef(state)
   const beginMobileEdit = useMobileChatStore((store) => store.beginEdit)
   const beginMobileReply = useMobileChatStore((store) => store.beginReply)
@@ -239,6 +257,12 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
   const setMobileAccountMetadata = useMobileSessionStore((store) => store.setAccountMetadata)
   const setMobileRouteTarget = useMobileSessionStore((store) => store.setRouteTarget)
   const openMobileSettingsPanel = useMobileSettingsStore((store) => store.openPanel)
+  const screenSharePublisher = useMobileVoiceStore((store) => store.screenSharePublisher)
+  const denyMobileScreenShare = useMobileVoiceStore((store) => store.denyScreenShare)
+  const failMobileScreenShare = useMobileVoiceStore((store) => store.failScreenShare)
+  const publishMobileScreenShare = useMobileVoiceStore((store) => store.publishScreenShare)
+  const requestMobileScreenShare = useMobileVoiceStore((store) => store.requestScreenShare)
+  const stopMobileScreenShareState = useMobileVoiceStore((store) => store.stopScreenShare)
   const [serverUrl, setServerUrl] = useState(state.serverUrl)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -263,6 +287,7 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchScope, setSearchScope] = useState<MobileSearchScope>('all')
+  const [screenSharePreflightOpen, setScreenSharePreflightOpen] = useState(false)
   const activeChannel = selectedChannel(state)
   const activeServer = activeMobileServerConnection(state)
   const developerOrganizationId =
@@ -337,6 +362,28 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
       },
     ],
     [insets.bottom, insets.top],
+  )
+  const screenShareSupportUi = (
+    <>
+      {Platform.OS === 'ios' ? (
+        <NativeScreenCapturePickerView
+          ref={screenCapturePickerRef}
+          style={styles.hiddenScreenCapturePicker}
+        />
+      ) : null}
+      {screenSharePreflightOpen ? (
+        <MobileScreenSharePreflightSheet
+          roomName={activeVoiceRoomName ?? 'OpenCord voice'}
+          onCancel={() => {
+            setScreenSharePreflightOpen(false)
+            denyMobileScreenShare('Screen sharing was cancelled.')
+          }}
+          onStart={() => {
+            void startMobileScreenShare()
+          }}
+        />
+      ) : null}
+    </>
   )
   const loginPanelStyle = useMemo(
     () => [styles.loginPanel, { paddingTop: Math.max(40, height * 0.1) }],
@@ -642,6 +689,7 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
         displayName: state.voice.media?.displayName ?? activeVoiceRoomName ?? null,
         errorMessage: state.voice.errorMessage,
         localAudioTracks: mediaSnapshot?.localAudioTracks ?? null,
+        localScreenShareTracks: mediaSnapshot?.localScreenShareTracks ?? null,
         participantIdentity: state.voice.media?.participantIdentity ?? null,
         participants: state.voice.participants.map((participant) => ({
           id: participant.id,
@@ -658,6 +706,7 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
           participantIdentity: stream.participantIdentity,
         })),
         roomName: state.voice.media?.roomName ?? null,
+        screenSharePublisher,
         selfDeaf: state.voice.selfDeaf,
         selfMute: state.voice.selfMute,
       },
@@ -678,7 +727,7 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
     }).catch(() => {
       // The Phase 10 harness may close while the simulator is still unwinding.
     })
-  }, [activeVoiceRoomName, e2eLaunchConfig?.commandUrl, e2eLaunchConfig?.runId, state])
+  }, [activeVoiceRoomName, e2eLaunchConfig?.commandUrl, e2eLaunchConfig?.runId, screenSharePublisher, state])
 
   useEffect(() => {
     void refreshNativePermissions()
@@ -686,6 +735,7 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
     return () => {
       void voiceSessionRef.current?.disconnect()
       voiceSessionRef.current = null
+      stopMobileScreenShareState()
     }
   }, [])
 
@@ -887,6 +937,7 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
     try {
       await voiceSessionRef.current?.disconnect()
       voiceSessionRef.current = null
+      stopMobileScreenShareState()
       if (logoutToken) {
         await createOpenCordApiClient({
           baseUrl: logoutServerUrl,
@@ -1787,6 +1838,85 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
     dispatch({ type: 'permission.updated', kind, status })
   }
 
+  function openMobileScreenSharePreflight() {
+    if (!voiceSessionRef.current || state.voice.connectionStatus !== 'connected') {
+      failMobileScreenShare('Join a voice channel or meeting before sharing your screen.')
+      return
+    }
+    if (!state.voice.media?.canPublishScreen) {
+      failMobileScreenShare('This room does not allow you to share your screen.')
+      return
+    }
+
+    setScreenSharePreflightOpen(true)
+  }
+
+  async function startMobileScreenShare() {
+    setScreenSharePreflightOpen(false)
+    const session = voiceSessionRef.current
+    const current = stateRef.current
+    if (!session || current.voice.connectionStatus !== 'connected') {
+      failMobileScreenShare('Join a voice channel or meeting before sharing your screen.')
+      return
+    }
+    if (!current.voice.media?.canPublishScreen) {
+      failMobileScreenShare('This room does not allow you to share your screen.')
+      return
+    }
+
+    requestMobileScreenShare()
+    try {
+      await session.publishScreenShare({
+        iosBroadcastPickerReactTag:
+          Platform.OS === 'ios'
+            ? findNodeHandle(
+                screenCapturePickerRef.current as Parameters<typeof findNodeHandle>[0],
+              )
+            : null,
+      })
+      publishMobileScreenShare()
+      dispatch({ type: 'permission.updated', kind: 'screenShare', status: 'granted' })
+    } catch (error) {
+      const message = errorMessage(error, 'Screen sharing could not start.')
+      if (isScreenSharePermissionDenied(error)) {
+        denyMobileScreenShare(message)
+        dispatch({ type: 'permission.updated', kind: 'screenShare', status: 'denied' })
+        return
+      }
+
+      failMobileScreenShare(message)
+    }
+  }
+
+  async function stopMobileScreenShare() {
+    try {
+      await voiceSessionRef.current?.stopScreenShare()
+      stopMobileScreenShareState()
+      dispatch({ type: 'permission.updated', kind: 'screenShare', status: 'promptable' })
+    } catch (error) {
+      failMobileScreenShare(errorMessage(error, 'Screen sharing could not stop.'))
+    }
+  }
+
+  function syncMobileScreenSharePublisher(mediaState: NativeLiveKitVoiceState) {
+    const currentPublisher = useMobileVoiceStore.getState().screenSharePublisher
+    if (mediaState.localScreenShareTracks > 0) {
+      if (currentPublisher.status !== 'publishing') {
+        publishMobileScreenShare()
+      }
+      return
+    }
+
+    if (
+      currentPublisher.status === 'publishing' ||
+      currentPublisher.status === 'reconnecting' ||
+      currentPublisher.status === 'requestingPermission'
+    ) {
+      stopMobileScreenShareState()
+      dispatch({ type: 'permission.updated', kind: 'screenShare', status: 'promptable' })
+    }
+  }
+
   async function joinMobileVoice(channelId: string) {
     if (state.mediaPermissions.microphone !== 'granted') {
       const status = await requestNativeMediaPermission('microphone')
@@ -1803,6 +1933,7 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
 
     await voiceSessionRef.current?.disconnect()
     voiceSessionRef.current = null
+    stopMobileScreenShareState()
     dispatch({ type: 'voice.media_connecting', channelId })
 
     try {
@@ -1821,6 +1952,7 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
         selfMute: state.voice.selfMute,
         onNativeCallEnded: () => {
           voiceSessionRef.current = null
+          stopMobileScreenShareState()
           dispatch({ type: 'voice.leave' })
         },
         onStateChange: (mediaState) => {
@@ -1828,6 +1960,7 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
             type: 'voice.remote_screen_shares_updated',
             streams: mediaState.remoteScreenShareStreams,
           })
+          syncMobileScreenSharePublisher(mediaState)
         },
       })
       voiceSessionRef.current = session
@@ -1865,6 +1998,7 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
 
     await voiceSessionRef.current?.disconnect()
     voiceSessionRef.current = null
+    stopMobileScreenShareState()
     dispatch({ type: 'voice.media_connecting', channelId: meetingId, displayName: meetingTitle })
 
     try {
@@ -1883,6 +2017,7 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
         selfMute: state.voice.selfMute,
         onNativeCallEnded: () => {
           voiceSessionRef.current = null
+          stopMobileScreenShareState()
           dispatch({ type: 'voice.leave' })
         },
         onStateChange: (mediaState) => {
@@ -1890,6 +2025,7 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
             type: 'voice.remote_screen_shares_updated',
             streams: mediaState.remoteScreenShareStreams,
           })
+          syncMobileScreenSharePublisher(mediaState)
         },
       })
       voiceSessionRef.current = session
@@ -1930,6 +2066,7 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
   async function leaveVoice() {
     await voiceSessionRef.current?.disconnect()
     voiceSessionRef.current = null
+    stopMobileScreenShareState()
     dispatch({ type: 'voice.leave' })
   }
 
@@ -1969,10 +2106,15 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
     if (data.action === 'disconnect' || grants.can_subscribe === false) {
       void voiceSessionRef.current?.disconnect()
       voiceSessionRef.current = null
+      stopMobileScreenShareState()
       return
     }
     if (grants.can_publish_audio === false) {
       void voiceSessionRef.current?.setMuted(true)
+    }
+    if (grants.can_publish_screen === false) {
+      void voiceSessionRef.current?.stopScreenShare()
+      stopMobileScreenShareState()
     }
   }
 
@@ -1986,6 +2128,12 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
         break
       case 'leave':
         void leaveVoice()
+        break
+      case 'screenShareStart':
+        void startMobileScreenShare()
+        break
+      case 'screenShareStop':
+        void stopMobileScreenShare()
         break
       case null:
         break
@@ -2090,6 +2238,7 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
     return (
       <View style={shellStyle}>
         <StatusBar backgroundColor="#151515" barStyle="light-content" />
+        {screenShareSupportUi}
         <View style={styles.mobileWorkspace}>
           <ServerRail
             activeConnectionId={state.serverConnections.activeConnectionId}
@@ -2268,15 +2417,21 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
             <MobileVoiceTray
               channelName={activeVoiceRoomName}
               canListen={mobileCanListenToVoice(state)}
+              canPublishScreen={state.voice.media?.canPublishScreen === true}
               canSpeak={mobileCanSpeakInVoice(state)}
               participants={voiceParticipants}
               remoteScreenShares={state.voice.media?.remoteScreenShares ?? 0}
               remoteScreenShareStreams={state.voice.media?.remoteScreenShareStreams ?? []}
+              screenSharePublisher={screenSharePublisher}
               selfDeaf={state.voice.selfDeaf}
               selfMute={state.voice.selfMute}
               status={state.voice.connectionStatus}
               errorMessage={state.voice.errorMessage}
               onLeave={leaveVoice}
+              onRequestScreenShare={openMobileScreenSharePreflight}
+              onStopScreenShare={() => {
+                void stopMobileScreenShare()
+              }}
               onToggleDeaf={toggleDeaf}
               onToggleMute={toggleMute}
             />
@@ -2302,6 +2457,7 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
   return (
     <View style={shellStyle}>
       <StatusBar backgroundColor="#151515" barStyle="light-content" />
+      {screenShareSupportUi}
       <MobileChatHeader
         channel={activeChannel}
         memberDrawerOpen={memberDrawerOpen}
@@ -2428,15 +2584,21 @@ function OpenCordMobileApp({ initialE2EConfig }: OpenCordMobileAppProps) {
       <MobileVoiceTray
         channelName={activeVoiceRoomName}
         canListen={mobileCanListenToVoice(state)}
+        canPublishScreen={state.voice.media?.canPublishScreen === true}
         canSpeak={mobileCanSpeakInVoice(state)}
         participants={voiceParticipants}
         remoteScreenShares={state.voice.media?.remoteScreenShares ?? 0}
         remoteScreenShareStreams={state.voice.media?.remoteScreenShareStreams ?? []}
+        screenSharePublisher={screenSharePublisher}
         selfDeaf={state.voice.selfDeaf}
         selfMute={state.voice.selfMute}
         status={state.voice.connectionStatus}
         errorMessage={state.voice.errorMessage}
         onLeave={leaveVoice}
+        onRequestScreenShare={openMobileScreenSharePreflight}
+        onStopScreenShare={() => {
+          void stopMobileScreenShare()
+        }}
         onToggleDeaf={toggleDeaf}
         onToggleMute={toggleMute}
       />
@@ -3954,38 +4116,96 @@ function PermissionSettingsRows({
   )
 }
 
+function MobileScreenSharePreflightSheet({
+  roomName,
+  onCancel,
+  onStart,
+}: {
+  roomName: string
+  onCancel: () => void
+  onStart: () => void
+}) {
+  return (
+    <View style={styles.screenSharePreflight}>
+      <View style={styles.sheetHeader}>
+        <View style={styles.screenSharePreflightCopy}>
+          <Text style={styles.sheetTitle}>Share screen</Text>
+          <Text style={styles.subtle}>{roomName}</Text>
+        </View>
+        <Pressable accessibilityRole="button" onPress={onCancel} style={styles.closeSheetButton}>
+          <Text style={styles.headerActionText}>Close</Text>
+        </Pressable>
+      </View>
+      <Text style={styles.permissionLabel}>OpenCord will ask your phone for screen capture.</Text>
+      <Text style={styles.subtle}>
+        Everything visible on your screen can be shared, including notifications. Stop sharing
+        from this tray or from the system sharing indicator.
+      </Text>
+      <View style={styles.screenSharePreflightActions}>
+        <Pressable accessibilityRole="button" onPress={onCancel} style={styles.secondarySettingsButton}>
+          <Text style={styles.primaryButtonText}>Cancel</Text>
+        </Pressable>
+        <Pressable accessibilityRole="button" onPress={onStart} style={styles.primaryButton}>
+          <Text style={styles.primaryButtonText}>Start sharing</Text>
+        </Pressable>
+      </View>
+    </View>
+  )
+}
+
 function MobileVoiceTray({
   canListen,
+  canPublishScreen,
   canSpeak,
   channelName,
   errorMessage,
   participants,
   remoteScreenShares,
   remoteScreenShareStreams,
+  screenSharePublisher,
   selfDeaf,
   selfMute,
   status,
   onLeave,
+  onRequestScreenShare,
+  onStopScreenShare,
   onToggleDeaf,
   onToggleMute,
 }: {
   canListen: boolean
+  canPublishScreen: boolean
   canSpeak: boolean
   channelName?: string
   errorMessage: string | null
   participants: MobileVoiceParticipant[]
   remoteScreenShares: number
   remoteScreenShareStreams: NativeScreenShareStream[]
+  screenSharePublisher: MobileVoiceScreenSharePublisher
   selfDeaf: boolean
   selfMute: boolean
   status: 'idle' | 'connecting' | 'connected' | 'blocked' | 'failed'
   onLeave: () => void
+  onRequestScreenShare: () => void
+  onStopScreenShare: () => void
   onToggleDeaf: () => void
   onToggleMute: () => void
 }) {
   if (!channelName) {
     return null
   }
+
+  const shareActive = screenSharePublisher.status === 'publishing'
+  const shareBusy =
+    screenSharePublisher.status === 'requestingPermission' ||
+    screenSharePublisher.status === 'reconnecting'
+  const canShowScreenShareControl =
+    status === 'connected' && canPublishScreen &&
+    (screenSharePublisher.status === 'idle' ||
+      screenSharePublisher.status === 'stopped' ||
+      screenSharePublisher.status === 'denied' ||
+      screenSharePublisher.status === 'failed' ||
+      shareActive ||
+      shareBusy)
 
   return (
     <View style={styles.voiceTray}>
@@ -4013,6 +4233,23 @@ function MobileVoiceTray({
           >
             <Text style={styles.headerActionText}>{selfDeaf ? 'D' : 'd'}</Text>
           </Pressable>
+          {canShowScreenShareControl ? (
+            <Pressable
+              accessibilityLabel={shareActive ? 'Stop screen share' : 'Share screen'}
+              accessibilityRole="button"
+              disabled={shareBusy}
+              onPress={shareActive ? onStopScreenShare : onRequestScreenShare}
+              style={[
+                styles.voiceScreenShareButton,
+                shareActive ? styles.activeVoiceScreenShareButton : null,
+                shareBusy ? styles.disabledIconButton : null,
+              ]}
+            >
+              <Text style={styles.voiceScreenShareText}>
+                {shareBusy ? 'Starting' : shareActive ? 'Stop' : 'Share'}
+              </Text>
+            </Pressable>
+          ) : null}
           <Pressable
             accessibilityLabel="Leave voice"
             accessibilityRole="button"
@@ -4026,7 +4263,12 @@ function MobileVoiceTray({
       <Text style={styles.voiceCompactStatus}>
         {canListen ? 'Listening' : 'Deafened'} / {canSpeak ? 'Speaking' : 'Muted'}
         {remoteScreenShares > 0 ? ` / ${remoteScreenShares} screen share` : ''}
+        {screenSharePublisher.status === 'publishing' ? ' / sharing your screen' : ''}
       </Text>
+      {screenSharePublisher.status === 'denied' ||
+      screenSharePublisher.status === 'failed' ? (
+        <Text style={styles.errorText}>{screenSharePublisher.message}</Text>
+      ) : null}
       {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
       <RemoteScreenShareStrip streams={remoteScreenShareStreams} />
       <View style={styles.voiceParticipants}>
@@ -4923,6 +5165,16 @@ function errorMessage(error: unknown, fallback: string) {
   return fallback
 }
 
+function isScreenSharePermissionDenied(error: unknown) {
+  const message = errorMessage(error, '').toLowerCase()
+  return (
+    message.includes('cancel') ||
+    message.includes('denied') ||
+    message.includes('not allowed') ||
+    message.includes('permission')
+  )
+}
+
 function initialsForLabel(value: string) {
   const parts = value
     .split(/\s+/)
@@ -5023,6 +5275,12 @@ const styles = StyleSheet.create({
   primaryButtonText: {
     color: '#ffffff',
     fontWeight: '800',
+  },
+  hiddenScreenCapturePicker: {
+    height: 1,
+    opacity: 0,
+    position: 'absolute',
+    width: 1,
   },
   header: {
     alignItems: 'center',
@@ -5639,6 +5897,22 @@ const styles = StyleSheet.create({
     minWidth: 78,
     paddingHorizontal: 10,
   },
+  screenSharePreflight: {
+    backgroundColor: '#1d1d1d',
+    borderBottomColor: '#2b2f2d',
+    borderBottomWidth: 1,
+    gap: 10,
+    padding: 12,
+  },
+  screenSharePreflightCopy: {
+    flex: 1,
+    gap: 2,
+    minWidth: 0,
+  },
+  screenSharePreflightActions: {
+    flexDirection: 'row',
+    gap: 10,
+  },
   flexList: {
     flex: 1,
   },
@@ -5798,6 +6072,24 @@ const styles = StyleSheet.create({
   voiceActions: {
     flexDirection: 'row',
     gap: 6,
+  },
+  voiceScreenShareButton: {
+    alignItems: 'center',
+    backgroundColor: '#24302d',
+    borderColor: '#28796d',
+    borderRadius: 16,
+    borderWidth: 1,
+    height: 32,
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+  },
+  activeVoiceScreenShareButton: {
+    backgroundColor: '#28796d',
+  },
+  voiceScreenShareText: {
+    color: '#f2f3f5',
+    fontSize: 11,
+    fontWeight: '900',
   },
   voiceIconButton: {
     alignItems: 'center',

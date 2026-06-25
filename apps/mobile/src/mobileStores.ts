@@ -124,19 +124,35 @@ export type MobileVoiceScreenShareWatcher =
   | { status: 'watching'; remoteScreenShares: number }
   | { status: 'error'; remoteScreenShares: number; message: string }
 
+export type MobileVoiceScreenSharePublisher =
+  | { status: 'idle' }
+  | { status: 'requestingPermission' }
+  | { status: 'publishing' }
+  | { status: 'reconnecting' }
+  | { status: 'stopped' }
+  | { status: 'denied'; message: string }
+  | { status: 'failed'; message: string }
+
 export type MobileVoiceStore = {
   activeRoute: OpenCordRouteTarget | null
   connectionStatus: 'idle' | 'joining' | 'joined' | 'reconnecting' | 'error'
   deafened: boolean
   errorMessage: string | null
   muted: boolean
+  screenSharePublisher: MobileVoiceScreenSharePublisher
   screenShareWatcher: MobileVoiceScreenShareWatcher
+  denyScreenShare: (message: string) => void
+  failScreenShare: (message: string) => void
   joinRoute: (routeTarget: OpenCordRouteTarget) => void
   leave: () => void
+  publishScreenShare: () => void
+  reconnectScreenShare: () => void
+  requestScreenShare: () => void
   setDeafened: (deafened: boolean) => void
   setError: (message: string) => void
   setMute: (muted: boolean) => void
   setScreenShareWatcher: (watcher: MobileVoiceScreenShareWatcher) => void
+  stopScreenShare: () => void
 }
 
 export type MobileSettingsStore = {
@@ -220,15 +236,22 @@ const initialVoiceData = {
   deafened: false,
   errorMessage: null,
   muted: false,
+  screenSharePublisher: { status: 'idle' },
   screenShareWatcher: { status: 'idle', remoteScreenShares: 0 },
 } satisfies Omit<
   MobileVoiceStore,
+  | 'denyScreenShare'
+  | 'failScreenShare'
   | 'joinRoute'
   | 'leave'
+  | 'publishScreenShare'
+  | 'reconnectScreenShare'
+  | 'requestScreenShare'
   | 'setDeafened'
   | 'setError'
   | 'setMute'
   | 'setScreenShareWatcher'
+  | 'stopScreenShare'
 >
 
 const initialSettingsData = {
@@ -415,17 +438,24 @@ export const useMobileDeveloperStore = create<MobileDeveloperStore>((set) => ({
 
 export const useMobileVoiceStore = create<MobileVoiceStore>((set) => ({
   ...initialVoiceData,
+  denyScreenShare: (message) => set({ screenSharePublisher: { status: 'denied', message } }),
+  failScreenShare: (message) => set({ screenSharePublisher: { status: 'failed', message } }),
   joinRoute: (activeRoute) =>
     set({
       activeRoute,
       connectionStatus: 'joining',
       errorMessage: null,
+      screenSharePublisher: { status: 'idle' },
     }),
   leave: () => set(initialVoiceData),
+  publishScreenShare: () => set({ screenSharePublisher: { status: 'publishing' } }),
+  reconnectScreenShare: () => set({ screenSharePublisher: { status: 'reconnecting' } }),
+  requestScreenShare: () => set({ screenSharePublisher: { status: 'requestingPermission' } }),
   setDeafened: (deafened) => set({ deafened }),
   setError: (errorMessage) => set({ connectionStatus: 'error', errorMessage }),
   setMute: (muted) => set({ muted }),
   setScreenShareWatcher: (screenShareWatcher) => set({ screenShareWatcher }),
+  stopScreenShare: () => set({ screenSharePublisher: { status: 'stopped' } }),
 }))
 
 export const useMobileSettingsStore = create<MobileSettingsStore>((set) => ({

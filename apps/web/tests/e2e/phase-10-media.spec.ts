@@ -72,6 +72,37 @@ const OC10_011_SCREENSHOT_DIR = path.join(OC10_011_EVIDENCE_DIR, 'screenshots')
 const OC10_012_EVIDENCE_DIR =
   process.env.OPENCORD_PHASE10_OC10_012_DIR ??
   path.join(EVIDENCE_ROOT, `${timestampForEvidence()}-oc-10-012-observability-diagnostics`)
+const OC11_SCREEN_SHARE_EVIDENCE_DIR =
+  process.env.OPENCORD_PHASE11_SCREEN_SHARE_DIR ??
+  '<WORKSPACE>/opencord/output/phase-11-client-ui-feature-parity/' +
+    `${timestampForEvidence()}-oc-11-mobile-screen-share-publish`
+const OC11_SCREEN_SHARE_SCREENSHOT_DIR = path.join(OC11_SCREEN_SHARE_EVIDENCE_DIR, 'screenshots')
+const OC11_SCREEN_SHARE_LOG_DIR = path.join(OC11_SCREEN_SHARE_EVIDENCE_DIR, 'logs')
+const PHASE11_EVIDENCE_ROOT =
+  process.env.OPENCORD_PHASE11_EVIDENCE_ROOT ??
+  '<WORKSPACE>/opencord/output/phase-11-client-ui-feature-parity'
+const OC11_ANDROID_TO_IOS_SCREEN_SHARE_EVIDENCE_DIR =
+  process.env.OPENCORD_PHASE11_ANDROID_TO_IOS_SCREEN_SHARE_DIR ??
+  path.join(PHASE11_EVIDENCE_ROOT, `${timestampForEvidence()}-oc-11-android-share-ios-watch`)
+const OC11_ANDROID_TO_IOS_SCREEN_SHARE_SCREENSHOT_DIR = path.join(
+  OC11_ANDROID_TO_IOS_SCREEN_SHARE_EVIDENCE_DIR,
+  'screenshots',
+)
+const OC11_ANDROID_TO_IOS_SCREEN_SHARE_LOG_DIR = path.join(
+  OC11_ANDROID_TO_IOS_SCREEN_SHARE_EVIDENCE_DIR,
+  'logs',
+)
+const OC11_IOS_TO_ANDROID_SCREEN_SHARE_EVIDENCE_DIR =
+  process.env.OPENCORD_PHASE11_IOS_TO_ANDROID_SCREEN_SHARE_DIR ??
+  path.join(PHASE11_EVIDENCE_ROOT, `${timestampForEvidence()}-oc-11-ios-share-android-watch`)
+const OC11_IOS_TO_ANDROID_SCREEN_SHARE_SCREENSHOT_DIR = path.join(
+  OC11_IOS_TO_ANDROID_SCREEN_SHARE_EVIDENCE_DIR,
+  'screenshots',
+)
+const OC11_IOS_TO_ANDROID_SCREEN_SHARE_LOG_DIR = path.join(
+  OC11_IOS_TO_ANDROID_SCREEN_SHARE_EVIDENCE_DIR,
+  'logs',
+)
 const DESKTOP_MAIN_PATH =
   process.env.OPENCORD_PHASE10_DESKTOP_MAIN_PATH ??
   '<WORKSPACE>/opencord-clients/apps/desktop/dist/main.js'
@@ -102,7 +133,7 @@ type MediaUser = {
   headers: { Authorization: string }
 }
 
-type MobileE2ECommand = 'deaf' | 'leave' | 'mute'
+type MobileE2ECommand = 'deaf' | 'leave' | 'mute' | 'screenShareStart' | 'screenShareStop'
 
 type MobileE2ECommandServer = {
   close: () => Promise<void>
@@ -128,6 +159,7 @@ type MobileE2EStateSnapshot = {
     displayName?: string | null
     errorMessage?: string | null
     localAudioTracks?: number | null
+    localScreenShareTracks?: number | null
     participantIdentity?: string | null
     participants?: Array<{
       id?: string
@@ -143,6 +175,10 @@ type MobileE2EStateSnapshot = {
       participantIdentity?: string
     }>
     roomName?: string | null
+    screenSharePublisher?: {
+      message?: string
+      status?: string
+    }
     selfDeaf?: boolean
     selfMute?: boolean
   }
@@ -626,6 +662,578 @@ test('OC-10-006 browser and Android 15 join voice, share screen, and sync contro
     )
   } finally {
     await Promise.allSettled([browserContext.close()])
+  }
+})
+
+test('OC-11 Android 15 publishes screen share to browser watcher', async ({
+  browser,
+  request,
+}) => {
+  test.skip(
+    process.env.OPENCORD_PHASE11_ANDROID_SCREEN_SHARE_E2E !== '1',
+    'OC-11 Android screen-share publish requires a wiped/running Android 15 emulator, installed debug app, Metro, API, LiveKit, and web dev server.',
+  )
+
+  await mkdir(OC11_SCREEN_SHARE_SCREENSHOT_DIR, { recursive: true })
+  await mkdir(OC11_SCREEN_SHARE_LOG_DIR, { recursive: true })
+  await writeFile(
+    path.join(OC11_SCREEN_SHARE_EVIDENCE_DIR, 'commands.md'),
+    [
+      '# Commands',
+      '',
+      '```bash',
+      'cd <WORKSPACE>/opencord-clients',
+      'OPENCORD_PHASE11_ANDROID_SCREEN_SHARE_E2E=1 OPENCORD_PHASE11_SCREEN_SHARE_DIR=<WORKSPACE>/opencord/output/phase-11-client-ui-feature-parity/<run> fnm exec --using 26 pnpm --filter web exec playwright test apps/web/tests/e2e/phase-10-media.spec.ts --grep "OC-11 Android 15 publishes screen share"',
+      '```',
+      '',
+    ].join('\n'),
+  )
+
+  const liveKitLogSince = new Date(Date.now() - 1_000).toISOString()
+  await adb(['logcat', '-c'])
+  const seeded = await loadSeedMediaContext(request)
+  const screenShareRoleId = await createRole(
+    request,
+    seeded.owner,
+    seeded.spaceId,
+    `Phase 11 Android Publish Screen ${Date.now()}`,
+    ['SHARE_SCREEN'],
+  )
+  await assignRole(request, seeded.owner, seeded.spaceId, screenShareRoleId, seeded.owner.userId)
+  await writeFile(
+    path.join(OC11_SCREEN_SHARE_EVIDENCE_DIR, 'session-context.json'),
+    `${JSON.stringify(
+      {
+        androidEmail: seeded.owner.email,
+        androidUserId: seeded.owner.userId,
+        browserEmail: seeded.guest.email,
+        browserUserId: seeded.guest.userId,
+        organizationId: seeded.organizationId,
+        spaceId: seeded.spaceId,
+        voiceChannelId: seeded.voiceChannelId,
+      },
+      null,
+      2,
+    )}\n`,
+  )
+
+  await ensureAndroidOwnerVoiceReady(
+    OC11_SCREEN_SHARE_LOG_DIR,
+    OC11_SCREEN_SHARE_SCREENSHOT_DIR,
+  )
+
+  const browserContext = await newMediaContext(browser)
+  const browserPage = await browserContext.newPage()
+
+  try {
+    await startLocalAlpha(browserPage, seeded.guest)
+    await browserPage.getByRole('button', { name: 'Join Voice: Voice Lounge' }).click()
+    await expect(browserPage.getByLabel('Voice controls')).toContainText('Voice Lounge', {
+      timeout: 30_000,
+    })
+    await expect.poll(() => remoteParticipantCount(browserPage), { timeout: 60_000 }).toBe(1)
+
+    await tapAndroidByDescription('Share screen')
+    const preflightXml = await waitForAndroidText('OpenCord will ask your phone for screen capture.', 30_000)
+    await writeFile(
+      path.join(OC11_SCREEN_SHARE_LOG_DIR, 'android-screen-share-preflight-window.xml'),
+      preflightXml,
+    )
+    await writeAndroidScreenshot(
+      'android-screen-share-preflight.png',
+      OC11_SCREEN_SHARE_SCREENSHOT_DIR,
+    )
+    await tapAndroidByDescription('Start sharing')
+    await approveAndroidScreenCapturePrompt()
+
+    const publishingXml = await waitForAndroidText('sharing your screen', 60_000)
+    await writeFile(
+      path.join(OC11_SCREEN_SHARE_LOG_DIR, 'android-screen-share-publishing-window.xml'),
+      publishingXml,
+    )
+    await writeAndroidScreenshot(
+      'android-screen-share-publishing.png',
+      OC11_SCREEN_SHARE_SCREENSHOT_DIR,
+    )
+
+    const browserWatchEvidence = await waitForReceivedScreenShare(browserPage)
+    await writeEvidenceTo(
+      OC11_SCREEN_SHARE_EVIDENCE_DIR,
+      'browser-watching-android-screen-share.json',
+      browserWatchEvidence,
+    )
+    await browserPage.screenshot({
+      path: path.join(OC11_SCREEN_SHARE_SCREENSHOT_DIR, 'browser-watching-android-screen-share.png'),
+    })
+
+    const androidScreenPublishLog = await waitForLiveKitLine(
+      liveKitLogSince,
+      (line) =>
+        line.includes('mediaTrack published') &&
+        line.includes(`"participant": "${seeded.owner.userId}"`) &&
+        line.includes('"kind": "video"') &&
+        line.includes('"source": "SCREEN_SHARE"'),
+      90_000,
+    )
+    await writeFile(
+      path.join(OC11_SCREEN_SHARE_LOG_DIR, 'android-screen-share-publish-livekit.log'),
+      androidScreenPublishLog,
+    )
+    const androidScreenTrackId = extractLiveKitTrackId(androidScreenPublishLog)
+    const browserScreenSubscribeLog = await waitForLiveKitLine(
+      liveKitLogSince,
+      (line) =>
+        line.includes('subscribed to track') &&
+        line.includes(`"participant": "${seeded.guest.userId}"`) &&
+        line.includes(`"trackID": "${androidScreenTrackId}"`),
+      120_000,
+    )
+    await writeFile(
+      path.join(OC11_SCREEN_SHARE_LOG_DIR, 'browser-android-screen-share-subscribe-livekit.log'),
+      browserScreenSubscribeLog,
+    )
+
+    await tapAndroidByDescription('Stop screen share')
+    const stoppedXml = await waitForAndroidText('Voice connected', 30_000)
+    await writeFile(
+      path.join(OC11_SCREEN_SHARE_LOG_DIR, 'android-screen-share-stopped-window.xml'),
+      stoppedXml,
+    )
+    await writeAndroidScreenshot(
+      'android-screen-share-stopped.png',
+      OC11_SCREEN_SHARE_SCREENSHOT_DIR,
+    )
+    await expect
+      .poll(() => remoteScreenShareVideoCount(browserPage), { timeout: 45_000 })
+      .toBe(0)
+
+    await writeFile(
+      path.join(OC11_SCREEN_SHARE_LOG_DIR, 'android-logcat-after-pass.log'),
+      await adb(['logcat', '-d', '-t', '2000']),
+    )
+    await writeFile(
+      path.join(OC11_SCREEN_SHARE_LOG_DIR, 'livekit.log'),
+      await liveKitLogsSince(liveKitLogSince),
+    )
+    await writeFile(
+      path.join(OC11_SCREEN_SHARE_EVIDENCE_DIR, 'result.md'),
+      [
+        '# OC-11 Android Mobile Screen-Share Publish',
+        '',
+        'Status: passed',
+        '',
+        `Android user: ${seeded.owner.userId}`,
+        `Browser participant: ${seeded.guest.userId}`,
+        `Voice channel: ${seeded.voiceChannelId}`,
+        '',
+        'Verified:',
+        '',
+        '- Android 15 app joined the same LiveKit voice room as the browser.',
+        '- Android showed the OpenCord screen-share preflight sheet before OS capture consent.',
+        '- Android granted OS screen capture and published a LiveKit SCREEN_SHARE video track.',
+        '- Browser subscribed to and rendered the Android screen-share watcher video.',
+        '- Android stop control unpublished the screen-share track and cleared the browser watcher.',
+        '',
+      ].join('\n'),
+    )
+  } finally {
+    await Promise.allSettled([browserContext.close()])
+  }
+})
+
+test('OC-11 Android 15 publishes screen share to iOS simulator watcher', async ({
+  request,
+}) => {
+  test.skip(
+    process.env.OPENCORD_PHASE11_ANDROID_IOS_SCREEN_SHARE_E2E !== '1',
+    'OC-11 Android to iOS screen-share publish requires Android 15, iPhone 17 Pro Max iOS 26.5, installed debug app, Metro, API, LiveKit, and web dev server.',
+  )
+
+  await mkdir(OC11_ANDROID_TO_IOS_SCREEN_SHARE_SCREENSHOT_DIR, { recursive: true })
+  await mkdir(OC11_ANDROID_TO_IOS_SCREEN_SHARE_LOG_DIR, { recursive: true })
+  await writeFile(
+    path.join(OC11_ANDROID_TO_IOS_SCREEN_SHARE_EVIDENCE_DIR, 'commands.md'),
+    [
+      '# Commands',
+      '',
+      '```bash',
+      'cd <WORKSPACE>/opencord-clients',
+      'OPENCORD_PHASE11_ANDROID_IOS_SCREEN_SHARE_E2E=1 OPENCORD_PHASE11_ANDROID_TO_IOS_SCREEN_SHARE_DIR=<WORKSPACE>/opencord/output/phase-11-client-ui-feature-parity/<run> fnm exec --using 26 pnpm --filter web exec playwright test apps/web/tests/e2e/phase-10-media.spec.ts --grep "OC-11 Android 15 publishes screen share to iOS simulator watcher"',
+      '```',
+      '',
+    ].join('\n'),
+  )
+
+  const liveKitLogSince = new Date(Date.now() - 1_000).toISOString()
+  await adb(['logcat', '-c'])
+  const seeded = await loadSeedMediaContext(request)
+  const runId = `oc-11-android-ios-${Date.now()}`
+  const screenShareRoleId = await createRole(
+    request,
+    seeded.owner,
+    seeded.spaceId,
+    `Phase 11 Android To iOS Screen ${Date.now()}`,
+    ['SHARE_SCREEN'],
+  )
+  await assignRole(request, seeded.owner, seeded.spaceId, screenShareRoleId, seeded.owner.userId)
+  const iosCommandServer = await startMobileE2ECommandServer()
+
+  try {
+    await writeFile(
+      path.join(OC11_ANDROID_TO_IOS_SCREEN_SHARE_EVIDENCE_DIR, 'session-context.json'),
+      `${JSON.stringify(
+        {
+          androidEmail: seeded.owner.email,
+          androidUserId: seeded.owner.userId,
+          iOSEmail: seeded.guest.email,
+          iOSCommandUrl: iosCommandServer.url,
+          iOSDevice: 'iPhone 17 Pro Max',
+          iOSRuntime: 'iOS 26.5',
+          iOSUdid: IOS_SIMULATOR_UDID,
+          iOSUserId: seeded.guest.userId,
+          organizationId: seeded.organizationId,
+          runId,
+          spaceId: seeded.spaceId,
+          voiceChannelId: seeded.voiceChannelId,
+        },
+        null,
+        2,
+      )}\n`,
+    )
+
+    await ensureAndroidOwnerVoiceReady(
+      OC11_ANDROID_TO_IOS_SCREEN_SHARE_LOG_DIR,
+      OC11_ANDROID_TO_IOS_SCREEN_SHARE_SCREENSHOT_DIR,
+    )
+    await ensureIosOwnerVoiceReady(
+      seeded.guest,
+      runId,
+      iosCommandServer,
+      OC11_ANDROID_TO_IOS_SCREEN_SHARE_LOG_DIR,
+      OC11_ANDROID_TO_IOS_SCREEN_SHARE_SCREENSHOT_DIR,
+    )
+
+    await tapAndroidByDescription('Share screen')
+    const preflightXml = await waitForAndroidText('OpenCord will ask your phone for screen capture.', 30_000)
+    await writeFile(
+      path.join(OC11_ANDROID_TO_IOS_SCREEN_SHARE_LOG_DIR, 'android-screen-share-preflight-window.xml'),
+      preflightXml,
+    )
+    await writeAndroidScreenshot(
+      'android-screen-share-preflight.png',
+      OC11_ANDROID_TO_IOS_SCREEN_SHARE_SCREENSHOT_DIR,
+    )
+    await tapAndroidByDescription('Start sharing')
+    await approveAndroidScreenCapturePrompt(OC11_ANDROID_TO_IOS_SCREEN_SHARE_LOG_DIR)
+
+    const publishingXml = await waitForAndroidText('sharing your screen', 60_000)
+    await writeFile(
+      path.join(OC11_ANDROID_TO_IOS_SCREEN_SHARE_LOG_DIR, 'android-screen-share-publishing-window.xml'),
+      publishingXml,
+    )
+    await writeAndroidScreenshot(
+      'android-screen-share-publishing.png',
+      OC11_ANDROID_TO_IOS_SCREEN_SHARE_SCREENSHOT_DIR,
+    )
+    const androidScreenPublishLog = await waitForLiveKitLine(
+      liveKitLogSince,
+      (line) =>
+        line.includes('mediaTrack published') &&
+        line.includes(`"participant": "${seeded.owner.userId}"`) &&
+        line.includes('"kind": "video"') &&
+        line.includes('"source": "SCREEN_SHARE"'),
+      90_000,
+    )
+    await writeFile(
+      path.join(OC11_ANDROID_TO_IOS_SCREEN_SHARE_LOG_DIR, 'android-screen-share-publish-livekit.log'),
+      androidScreenPublishLog,
+    )
+    const androidScreenTrackId = extractLiveKitTrackId(androidScreenPublishLog)
+    const iosScreenSubscribeLog = await waitForLiveKitLine(
+      liveKitLogSince,
+      (line) =>
+        line.includes('subscribed to track') &&
+        line.includes(`"participant": "${seeded.guest.userId}"`) &&
+        line.includes(`"trackID": "${androidScreenTrackId}"`),
+      120_000,
+    )
+    await writeFile(
+      path.join(OC11_ANDROID_TO_IOS_SCREEN_SHARE_LOG_DIR, 'ios-android-screen-share-subscribe-livekit.log'),
+      iosScreenSubscribeLog,
+    )
+    const iosWatchState = await waitForMobileE2EState(
+      iosCommandServer,
+      (state) =>
+        mobileE2ERemoteScreenShares(state, runId) > 0 &&
+        (state.voice?.remoteScreenShareStreams ?? []).some(
+          (stream) => stream.participantIdentity === seeded.owner.userId && stream.hasStreamUrl,
+        ),
+      90_000,
+      'iOS watching Android screen share',
+    )
+    await writeFile(
+      path.join(OC11_ANDROID_TO_IOS_SCREEN_SHARE_LOG_DIR, 'ios-watching-android-screen-share-state.json'),
+      mobileE2EStateJson(iosWatchState),
+    )
+    await writeIosScreenshot(
+      'ios-watching-android-screen-share.png',
+      OC11_ANDROID_TO_IOS_SCREEN_SHARE_SCREENSHOT_DIR,
+    )
+
+    await tapAndroidByDescription('Stop screen share')
+    const stoppedXml = await waitForAndroidText('Voice connected', 30_000)
+    await writeFile(
+      path.join(OC11_ANDROID_TO_IOS_SCREEN_SHARE_LOG_DIR, 'android-screen-share-stopped-window.xml'),
+      stoppedXml,
+    )
+    await writeAndroidScreenshot(
+      'android-screen-share-stopped.png',
+      OC11_ANDROID_TO_IOS_SCREEN_SHARE_SCREENSHOT_DIR,
+    )
+    const iosClearedState = await waitForMobileE2EState(
+      iosCommandServer,
+      (state) => mobileE2EStateMatchesRun(state, runId) && mobileE2ERemoteScreenShares(state, runId) === 0,
+      60_000,
+      'iOS Android screen-share watcher cleared',
+    )
+    await writeFile(
+      path.join(OC11_ANDROID_TO_IOS_SCREEN_SHARE_LOG_DIR, 'ios-screen-share-cleared-state.json'),
+      mobileE2EStateJson(iosClearedState),
+    )
+    await writeFile(
+      path.join(OC11_ANDROID_TO_IOS_SCREEN_SHARE_LOG_DIR, 'android-logcat-after-pass.log'),
+      await adb(['logcat', '-d', '-t', '2000']),
+    )
+    await writeFile(
+      path.join(OC11_ANDROID_TO_IOS_SCREEN_SHARE_LOG_DIR, 'livekit.log'),
+      await liveKitLogsSince(liveKitLogSince),
+    )
+    await writeFile(
+      path.join(OC11_ANDROID_TO_IOS_SCREEN_SHARE_EVIDENCE_DIR, 'result.md'),
+      [
+        '# OC-11 Android To iOS Mobile Screen-Share Publish',
+        '',
+        'Status: passed',
+        '',
+        `Android publisher: ${seeded.owner.userId}`,
+        `iOS watcher: ${seeded.guest.userId}`,
+        `Voice channel: ${seeded.voiceChannelId}`,
+        `Run id: ${runId}`,
+        '',
+        'Verified:',
+        '',
+        '- Android 15 app and iPhone 17 Pro Max iOS 26.5 simulator joined the same LiveKit voice room.',
+        '- Android showed the OpenCord preflight and Android OS capture prompt.',
+        '- Android published a LiveKit SCREEN_SHARE video track.',
+        '- iOS subscribed to the Android screen-share track and reported a remote screen-share stream URL.',
+        '- iOS screenshot captured the watcher state.',
+        '- Android stop control unpublished the track and iOS cleared the watcher state.',
+        '',
+      ].join('\n'),
+    )
+  } finally {
+    await Promise.allSettled([iosCommandServer.close()])
+  }
+})
+
+test('OC-11 iOS simulator publishes screen share to Android 15 watcher', async ({
+  request,
+}) => {
+  test.skip(
+    process.env.OPENCORD_PHASE11_IOS_ANDROID_SCREEN_SHARE_E2E !== '1',
+    'OC-11 iOS to Android screen-share publish requires Android 15, iPhone 17 Pro Max iOS 26.5, installed debug app with ReplayKit extension, Metro, API, LiveKit, and a controllable Simulator broadcast picker.',
+  )
+
+  await mkdir(OC11_IOS_TO_ANDROID_SCREEN_SHARE_SCREENSHOT_DIR, { recursive: true })
+  await mkdir(OC11_IOS_TO_ANDROID_SCREEN_SHARE_LOG_DIR, { recursive: true })
+  await writeFile(
+    path.join(OC11_IOS_TO_ANDROID_SCREEN_SHARE_EVIDENCE_DIR, 'commands.md'),
+    [
+      '# Commands',
+      '',
+      '```bash',
+      'cd <WORKSPACE>/opencord-clients',
+      'OPENCORD_PHASE11_IOS_ANDROID_SCREEN_SHARE_E2E=1 OPENCORD_PHASE11_IOS_TO_ANDROID_SCREEN_SHARE_DIR=<WORKSPACE>/opencord/output/phase-11-client-ui-feature-parity/<run> fnm exec --using 26 pnpm --filter web exec playwright test apps/web/tests/e2e/phase-10-media.spec.ts --grep "OC-11 iOS simulator publishes screen share to Android 15 watcher"',
+      '```',
+      '',
+    ].join('\n'),
+  )
+
+  const liveKitLogSince = new Date(Date.now() - 1_000).toISOString()
+  await adb(['logcat', '-c'])
+  const seeded = await loadSeedMediaContext(request)
+  const runId = `oc-11-ios-android-${Date.now()}`
+  const screenShareRoleId = await createRole(
+    request,
+    seeded.owner,
+    seeded.spaceId,
+    `Phase 11 iOS To Android Screen ${Date.now()}`,
+    ['SHARE_SCREEN'],
+  )
+  await assignRole(request, seeded.owner, seeded.spaceId, screenShareRoleId, seeded.guest.userId)
+  const iosCommandServer = await startMobileE2ECommandServer()
+
+  try {
+    await writeFile(
+      path.join(OC11_IOS_TO_ANDROID_SCREEN_SHARE_EVIDENCE_DIR, 'session-context.json'),
+      `${JSON.stringify(
+        {
+          androidEmail: seeded.owner.email,
+          androidUserId: seeded.owner.userId,
+          iOSEmail: seeded.guest.email,
+          iOSCommandUrl: iosCommandServer.url,
+          iOSDevice: 'iPhone 17 Pro Max',
+          iOSRuntime: 'iOS 26.5',
+          iOSUdid: IOS_SIMULATOR_UDID,
+          iOSUserId: seeded.guest.userId,
+          organizationId: seeded.organizationId,
+          runId,
+          spaceId: seeded.spaceId,
+          voiceChannelId: seeded.voiceChannelId,
+        },
+        null,
+        2,
+      )}\n`,
+    )
+
+    await ensureAndroidOwnerVoiceReady(
+      OC11_IOS_TO_ANDROID_SCREEN_SHARE_LOG_DIR,
+      OC11_IOS_TO_ANDROID_SCREEN_SHARE_SCREENSHOT_DIR,
+    )
+    await ensureIosOwnerVoiceReady(
+      seeded.guest,
+      runId,
+      iosCommandServer,
+      OC11_IOS_TO_ANDROID_SCREEN_SHARE_LOG_DIR,
+      OC11_IOS_TO_ANDROID_SCREEN_SHARE_SCREENSHOT_DIR,
+    )
+
+    iosCommandServer.send('screenShareStart')
+    const startRequestedState = await waitForMobileE2EState(
+      iosCommandServer,
+      (state) =>
+        mobileE2EStateMatchesRun(state, runId) &&
+        ['requestingPermission', 'publishing', 'failed', 'denied'].includes(
+          state.voice?.screenSharePublisher?.status ?? '',
+        ),
+      30_000,
+      'iOS screen-share start command accepted',
+    )
+    await writeFile(
+      path.join(OC11_IOS_TO_ANDROID_SCREEN_SHARE_LOG_DIR, 'ios-screen-share-start-requested-state.json'),
+      mobileE2EStateJson(startRequestedState),
+    )
+    await writeIosScreenshot(
+      'ios-screen-share-start-requested.png',
+      OC11_IOS_TO_ANDROID_SCREEN_SHARE_SCREENSHOT_DIR,
+    )
+
+    const iosScreenPublishLog = await waitForLiveKitLine(
+      liveKitLogSince,
+      (line) =>
+        line.includes('mediaTrack published') &&
+        line.includes(`"participant": "${seeded.guest.userId}"`) &&
+        line.includes('"kind": "video"') &&
+        line.includes('"source": "SCREEN_SHARE"'),
+      180_000,
+    )
+    await writeFile(
+      path.join(OC11_IOS_TO_ANDROID_SCREEN_SHARE_LOG_DIR, 'ios-screen-share-publish-livekit.log'),
+      iosScreenPublishLog,
+    )
+    const iosScreenTrackId = extractLiveKitTrackId(iosScreenPublishLog)
+    const publishingState = await waitForMobileE2EState(
+      iosCommandServer,
+      (state) => mobileE2ELocalScreenSharePublishing(state, runId),
+      60_000,
+      'iOS local screen-share publishing state',
+    )
+    await writeFile(
+      path.join(OC11_IOS_TO_ANDROID_SCREEN_SHARE_LOG_DIR, 'ios-screen-share-publishing-state.json'),
+      mobileE2EStateJson(publishingState),
+    )
+    await writeIosScreenshot(
+      'ios-screen-share-publishing.png',
+      OC11_IOS_TO_ANDROID_SCREEN_SHARE_SCREENSHOT_DIR,
+    )
+
+    const androidWatcherXml = await waitForAndroidText('Watching 1 screen share', 120_000)
+    await writeFile(
+      path.join(OC11_IOS_TO_ANDROID_SCREEN_SHARE_LOG_DIR, 'android-watching-ios-screen-share-window.xml'),
+      androidWatcherXml,
+    )
+    await writeAndroidScreenshot(
+      'android-watching-ios-screen-share.png',
+      OC11_IOS_TO_ANDROID_SCREEN_SHARE_SCREENSHOT_DIR,
+    )
+    const androidScreenSubscribeLog = await waitForLiveKitLine(
+      liveKitLogSince,
+      (line) =>
+        line.includes('subscribed to track') &&
+        line.includes(`"participant": "${seeded.owner.userId}"`) &&
+        line.includes(`"trackID": "${iosScreenTrackId}"`),
+      120_000,
+    )
+    await writeFile(
+      path.join(OC11_IOS_TO_ANDROID_SCREEN_SHARE_LOG_DIR, 'android-ios-screen-share-subscribe-livekit.log'),
+      androidScreenSubscribeLog,
+    )
+
+    iosCommandServer.send('screenShareStop')
+    const stoppedState = await waitForMobileE2EState(
+      iosCommandServer,
+      (state) =>
+        mobileE2EStateMatchesRun(state, runId) &&
+        (state.voice?.localScreenShareTracks ?? 0) === 0 &&
+        ['idle', 'stopped'].includes(state.voice?.screenSharePublisher?.status ?? ''),
+      60_000,
+      'iOS screen-share stopped state',
+    )
+    await writeFile(
+      path.join(OC11_IOS_TO_ANDROID_SCREEN_SHARE_LOG_DIR, 'ios-screen-share-stopped-state.json'),
+      mobileE2EStateJson(stoppedState),
+    )
+    const androidClearedXml = await waitForAndroidText('Voice connected', 60_000)
+    await writeFile(
+      path.join(OC11_IOS_TO_ANDROID_SCREEN_SHARE_LOG_DIR, 'android-after-ios-screen-share-stop-window.xml'),
+      androidClearedXml,
+    )
+    await writeAndroidScreenshot(
+      'android-after-ios-screen-share-stop.png',
+      OC11_IOS_TO_ANDROID_SCREEN_SHARE_SCREENSHOT_DIR,
+    )
+    await writeFile(
+      path.join(OC11_IOS_TO_ANDROID_SCREEN_SHARE_LOG_DIR, 'android-logcat-after-pass.log'),
+      await adb(['logcat', '-d', '-t', '2000']),
+    )
+    await writeFile(
+      path.join(OC11_IOS_TO_ANDROID_SCREEN_SHARE_LOG_DIR, 'livekit.log'),
+      await liveKitLogsSince(liveKitLogSince),
+    )
+    await writeFile(
+      path.join(OC11_IOS_TO_ANDROID_SCREEN_SHARE_EVIDENCE_DIR, 'result.md'),
+      [
+        '# OC-11 iOS To Android Mobile Screen-Share Publish',
+        '',
+        'Status: passed',
+        '',
+        `iOS publisher: ${seeded.guest.userId}`,
+        `Android watcher: ${seeded.owner.userId}`,
+        `Voice channel: ${seeded.voiceChannelId}`,
+        `Run id: ${runId}`,
+        '',
+        'Verified:',
+        '',
+        '- iPhone 17 Pro Max iOS 26.5 simulator and Android 15 app joined the same LiveKit voice room.',
+        '- iOS accepted the E2E screen-share start command through the native LiveKit session.',
+        '- iOS published a LiveKit SCREEN_SHARE video track.',
+        '- Android subscribed to and rendered the iOS screen-share watcher.',
+        '- iOS stop command unpublished the track and cleared local publish state.',
+        '',
+      ].join('\n'),
+    )
+  } finally {
+    await Promise.allSettled([iosCommandServer.close()])
   }
 })
 
@@ -3333,11 +3941,15 @@ async function setMemberChannelPermissionOverride(
   expect(response.ok()).toBeTruthy()
 }
 
-async function ensureAndroidOwnerVoiceReady() {
+async function ensureAndroidOwnerVoiceReady(
+  logDir = OC10_006_LOG_DIR,
+  screenshotDir = OC10_006_SCREENSHOT_DIR,
+) {
   await adb(['shell', 'am', 'force-stop', ANDROID_PACKAGE])
   await adb(['shell', 'pm', 'clear', ANDROID_PACKAGE])
   await grantAndroidPermission('android.permission.RECORD_AUDIO')
   await grantAndroidPermission('android.permission.CAMERA')
+  await grantAndroidPermission('android.permission.POST_NOTIFICATIONS')
   await adb(['shell', 'appops', 'set', ANDROID_PACKAGE, 'RECORD_AUDIO', 'allow'])
   await adb(['shell', 'monkey', '-p', ANDROID_PACKAGE, '-c', 'android.intent.category.LAUNCHER', '1'])
 
@@ -3347,14 +3959,14 @@ async function ensureAndroidOwnerVoiceReady() {
   await tapAndroidByDescription('Password')
   await adbInputText(SEED_OWNER_PASSWORD)
   await tapAndroidByDescription('Log in')
-  await waitForAndroidText('Channels', 45_000)
-  await writeFile(path.join(OC10_006_LOG_DIR, 'android-after-login-window.xml'), await dumpAndroidWindow())
-  await writeAndroidScreenshot('android-after-login.png')
+  await waitForAndroidText('Voice Lounge', 45_000)
+  await writeFile(path.join(logDir, 'android-after-login-window.xml'), await dumpAndroidWindow())
+  await writeAndroidScreenshot('android-after-login.png', screenshotDir)
 
-  await tapAndroidByDescription('V Voice Lounge')
+  await tapAndroidByDescription('Voice Lounge')
   await waitForAndroidText('Voice connected', 60_000)
-  await writeFile(path.join(OC10_006_LOG_DIR, 'android-voice-connected-window.xml'), await dumpAndroidWindow())
-  await writeAndroidScreenshot('android-voice-connected.png')
+  await writeFile(path.join(logDir, 'android-voice-connected-window.xml'), await dumpAndroidWindow())
+  await writeAndroidScreenshot('android-voice-connected.png', screenshotDir)
 }
 
 async function ensureAndroidMeetingReady(
@@ -3426,6 +4038,64 @@ async function tapAndroidByDescription(description: string) {
     throw new Error(`Unable to find Android node matching ${description}`)
   }
   await adb(['shell', 'input', 'tap', String(bounds.x), String(bounds.y)])
+}
+
+async function approveAndroidScreenCapturePrompt(logDir = OC11_SCREEN_SHARE_LOG_DIR) {
+  let xml = await waitForAndroidAnyText(['Start now', 'Start recording', 'Start'], 30_000)
+  await writeFile(
+    path.join(logDir, 'android-screen-capture-prompt-window.xml'),
+    xml,
+  )
+
+  if (xml.includes(escapeXml('A single app'))) {
+    const spinnerBounds = findAndroidNodeBounds(
+      xml,
+      'resource-id',
+      'com.android.systemui:id/screen_share_mode_spinner',
+    )
+    if (spinnerBounds) {
+      await adb(['shell', 'input', 'tap', String(spinnerBounds.x), String(spinnerBounds.y)])
+      const optionsXml = await waitForAndroidAnyText(['Entire screen'], 10_000)
+      const entireScreenBounds = findAndroidNodeBounds(optionsXml, 'text', 'Entire screen')
+      if (entireScreenBounds) {
+        await adb([
+          'shell',
+          'input',
+          'tap',
+          String(entireScreenBounds.x),
+          String(entireScreenBounds.y),
+        ])
+        xml = await waitForAndroidAnyText(['Start now', 'Start recording', 'Start'], 10_000)
+      }
+    }
+  }
+
+  const startBounds =
+    findAndroidNodeBounds(xml, 'resource-id', 'android:id/button1') ??
+    findAndroidNodeBounds(xml, 'text', 'Start now') ??
+    findAndroidNodeBounds(xml, 'text', 'Start recording') ??
+    findAndroidNodeBounds(xml, 'text', 'Start') ??
+    findAndroidNodeBounds(xml, 'content-desc', 'Start')
+  if (startBounds) {
+    await adb(['shell', 'input', 'tap', String(startBounds.x), String(startBounds.y)])
+    return
+  }
+
+  throw new Error(`Unable to find Android screen capture consent button\n${xml}`)
+}
+
+async function waitForAndroidAnyText(texts: string[], timeoutMs: number) {
+  const deadline = Date.now() + timeoutMs
+  let lastXml = ''
+  while (Date.now() < deadline) {
+    lastXml = await dumpAndroidWindow()
+    if (texts.some((text) => lastXml.includes(escapeXml(text)))) {
+      return lastXml
+    }
+    await delay(1_000)
+  }
+
+  throw new Error(`Timed out waiting for Android text: ${texts.join(' or ')}\n${lastXml}`)
 }
 
 async function adbInputText(text: string) {
@@ -3629,6 +4299,21 @@ function mobileE2EVoiceLeft(state: MobileE2EStateSnapshot, runId: string) {
   )
 }
 
+function mobileE2ELocalScreenSharePublishing(state: MobileE2EStateSnapshot, runId: string) {
+  return (
+    mobileE2EStateMatchesRun(state, runId) &&
+    state.voice?.screenSharePublisher?.status === 'publishing' &&
+    (state.voice?.localScreenShareTracks ?? 0) > 0
+  )
+}
+
+function mobileE2ERemoteScreenShares(state: MobileE2EStateSnapshot, runId: string) {
+  if (!mobileE2EStateMatchesRun(state, runId)) {
+    return -1
+  }
+  return state.voice?.remoteScreenShares ?? 0
+}
+
 function mobileE2EStateJson(state: MobileE2EStateSnapshot) {
   return `${JSON.stringify(state, null, 2)}\n`
 }
@@ -3637,6 +4322,8 @@ async function ensureIosOwnerVoiceReady(
   user: MediaUser,
   runId: string,
   commandServer: MobileE2ECommandServer,
+  logDir = OC10_007_LOG_DIR,
+  screenshotDir = OC10_007_SCREENSHOT_DIR,
 ) {
   await iosSimctl(['boot', IOS_SIMULATOR_UDID], { allowFailure: true })
   await iosSimctl(['bootstatus', IOS_SIMULATOR_UDID, '-b'])
@@ -3648,15 +4335,15 @@ async function ensureIosOwnerVoiceReady(
   })
   await iosSimctl(['privacy', IOS_SIMULATOR_UDID, 'grant', 'microphone', IOS_APP_BUNDLE_ID])
   await writeFile(
-    path.join(OC10_007_LOG_DIR, 'ios-privacy-microphone-granted.log'),
+    path.join(logDir, 'ios-privacy-microphone-granted.log'),
     'simctl privacy reset microphone followed by grant microphone for com.opencord\n',
   )
   await iosSimctl(
     [
       'launch',
       '--terminate-running-process',
-      `--stdout=${path.join(OC10_007_LOG_DIR, 'ios-app-stdout.log')}`,
-      `--stderr=${path.join(OC10_007_LOG_DIR, 'ios-app-stderr.log')}`,
+      `--stdout=${path.join(logDir, 'ios-app-stdout.log')}`,
+      `--stderr=${path.join(logDir, 'ios-app-stderr.log')}`,
       IOS_SIMULATOR_UDID,
       IOS_APP_BUNDLE_ID,
     ],
@@ -3681,7 +4368,7 @@ async function ensureIosOwnerVoiceReady(
     'iOS app launched, logged in, and rendered channels',
   )
   await writeFile(
-    path.join(OC10_007_LOG_DIR, 'ios-e2e-launch-state.json'),
+    path.join(logDir, 'ios-e2e-launch-state.json'),
     mobileE2EStateJson(launchState),
   )
   const connectedState = await waitForMobileE2EState(
@@ -3691,10 +4378,10 @@ async function ensureIosOwnerVoiceReady(
     'iOS voice connected state',
   )
   await writeFile(
-    path.join(OC10_007_LOG_DIR, 'ios-voice-connected-state.json'),
+    path.join(logDir, 'ios-voice-connected-state.json'),
     mobileE2EStateJson(connectedState),
   )
-  await writeIosScreenshot('ios-voice-connected.png')
+  await writeIosScreenshot('ios-voice-connected.png', screenshotDir)
 }
 
 async function ensureIosMeetingReady(
@@ -4012,7 +4699,7 @@ async function dumpAndroidWindow() {
 
 function findAndroidNodeBounds(
   xml: string,
-  attribute: 'content-desc' | 'text',
+  attribute: 'content-desc' | 'resource-id' | 'text',
   expectedValue: string,
 ) {
   const escaped = escapeXml(expectedValue)

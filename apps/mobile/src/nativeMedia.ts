@@ -1,7 +1,7 @@
 import type { MediaRoomToken } from '@opencord/api-client'
 import { AudioSession, registerGlobals } from '@livekit/react-native'
 import { Room, RoomEvent } from 'livekit-client'
-import { Platform } from 'react-native'
+import { NativeModules, Platform } from 'react-native'
 
 import {
   nativeLiveKitServerUrlForPlatform,
@@ -26,6 +26,7 @@ import {
 export type NativeLiveKitVoiceState = {
   status: 'connecting' | 'connected' | 'disconnected'
   localAudioTracks: number
+  localScreenShareTracks: number
   remoteAudioTracks: number
   remoteScreenShares: number
   remoteScreenShareStreams: NativeScreenShareStream[]
@@ -42,9 +43,15 @@ export type ConnectNativeLiveKitVoiceOptions = {
 
 export type NativeLiveKitVoiceSession = {
   disconnect: () => Promise<void>
+  publishScreenShare: (options?: PublishNativeScreenShareOptions) => Promise<void>
   setMuted: (muted: boolean) => Promise<void>
   setDeafened: (deafened: boolean) => Promise<void>
+  stopScreenShare: () => Promise<void>
   snapshot: () => NativeLiveKitVoiceState
+}
+
+export type PublishNativeScreenShareOptions = {
+  iosBroadcastPickerReactTag?: number | null
 }
 
 type NativePublication = {
@@ -97,6 +104,7 @@ type NativeRoom = {
   on: (event: string, listener: (...args: unknown[]) => void) => NativeRoom
   localParticipant: NativeParticipant & {
     setMicrophoneEnabled: (enabled: boolean) => Promise<void>
+    setScreenShareEnabled?: (enabled: boolean) => Promise<unknown>
   }
   remoteParticipants?: unknown
   state?: string
@@ -118,6 +126,7 @@ export async function connectNativeLiveKitVoice(
   let stopStatePoll: () => void = () => {}
   let lastDiagnosticSignature = ''
   let selfDeafened = options.selfDeaf
+  let localScreenShareActive = false
   let lastRemoteSubscriptionSignature = ''
   const screenShareResubscribeAttempts = new Map<string, number>()
   const subscribedScreenShareStreams = new Map<string, NativeScreenShareStream>()
@@ -196,6 +205,15 @@ export async function connectNativeLiveKitVoice(
       notify('connected')
     }
   })
+  room.on(String(RoomEvent.LocalTrackPublished), () => {
+    notify('connected')
+  })
+  room.on(String(RoomEvent.LocalTrackUnpublished), (publication) => {
+    if (isNativeScreenSharePublication(publication as NativePublication)) {
+      localScreenShareActive = false
+      notify('connected')
+    }
+  })
 
   const cleanup = async ({ endNativeCall }: { endNativeCall: boolean }) => {
     if (cleanedUp) {
@@ -204,6 +222,9 @@ export async function connectNativeLiveKitVoice(
     cleanedUp = true
     stopStatePoll()
     stopRefreshListeners()
+    await stopNativeScreenShare(room, () => {
+      localScreenShareActive = false
+    })
     room.disconnect()
     await Promise.resolve(AudioSession.stopAudioSession())
     if (endNativeCall) {
@@ -265,6 +286,26 @@ export async function connectNativeLiveKitVoice(
     async disconnect() {
       await cleanup({ endNativeCall: true })
     },
+    async publishScreenShare(publishOptions) {
+      if (!options.media.grants.canPublishScreen) {
+        throw new Error('Screen share is not allowed for this room')
+      }
+      if (!room.localParticipant.setScreenShareEnabled) {
+        throw new Error('Native screen share is not available on this platform')
+      }
+
+      try {
+        if (Platform.OS === 'ios') {
+          await showIosScreenCapturePicker(publishOptions?.iosBroadcastPickerReactTag)
+        }
+        await room.localParticipant.setScreenShareEnabled(true)
+        localScreenShareActive = true
+        notify('connected')
+      } catch (error) {
+        localScreenShareActive = false
+        throw normalizedNativeScreenShareStartError(error)
+      }
+    },
     async setMuted(muted: boolean) {
       if (options.media.grants.canPublishAudio) {
         await room.localParticipant.setMicrophoneEnabled(!muted)
@@ -276,6 +317,15 @@ export async function connectNativeLiveKitVoice(
       selfDeafened = deafened
       lastRemoteSubscriptionSignature = ''
       syncRemoteSubscriptions()
+      notify('connected')
+    },
+    async stopScreenShare() {
+      if (!localScreenShareActive) {
+        return
+      }
+      await stopNativeScreenShare(room, () => {
+        localScreenShareActive = false
+      })
       notify('connected')
     },
     snapshot() {
@@ -363,6 +413,9 @@ function snapshotNativeLiveKitVoice(
     localAudioTracks: publicationValues(room.localParticipant.audioTrackPublications).filter(
       (publication) => !publication.isMuted,
     ).length,
+    localScreenShareTracks: publicationValues(room.localParticipant.videoTrackPublications).filter(
+      isNativeScreenSharePublication,
+    ).length,
     remoteAudioTracks: participants.flatMap((participant) =>
       publicationValues(participant.audioTrackPublications),
     ).length,
@@ -390,6 +443,7 @@ function logNativeMediaDiagnostics(
   const diagnostics = {
     status: state.status,
     localAudioTracks: state.localAudioTracks,
+    localScreenShareTracks: state.localScreenShareTracks,
     remoteAudioTracks: state.remoteAudioTracks,
     remoteScreenShares: state.remoteScreenShares,
     remoteScreenShareStreams: state.remoteScreenShareStreams.map((stream) => ({
@@ -422,6 +476,57 @@ function logNativeMediaDiagnostics(
   if (shouldLog(signature)) {
     console.info('OpenCord native media state', signature)
   }
+}
+
+async function showIosScreenCapturePicker(reactTag?: number | null) {
+  const pickerModule = NativeModules.ScreenCapturePickerViewManager as
+    | { show?: (reactTag: number) => Promise<unknown> | void }
+    | undefined
+  if (!reactTag || !pickerModule?.show) {
+    throw new Error('iOS screen share picker is not mounted')
+  }
+
+  await Promise.resolve(pickerModule.show(reactTag))
+}
+
+function normalizedNativeScreenShareStartError(error: unknown) {
+  if (error instanceof Error && error.message) {
+    return error
+  }
+
+  if (Platform.OS === 'ios') {
+    const nativeDetail =
+      typeof error === 'string'
+        ? error
+        : error && typeof error === 'object'
+          ? JSON.stringify(error)
+          : ''
+    return new Error(
+      [
+        'iOS screen sharing could not start.',
+        'The iOS simulator cannot publish ReplayKit screen capture; use a physical iPhone for publish verification.',
+        nativeDetail ? `Native detail: ${nativeDetail}` : '',
+      ]
+        .filter(Boolean)
+        .join(' '),
+    )
+  }
+
+  if (typeof error === 'string' && error.trim()) {
+    return new Error(error)
+  }
+
+  return new Error('Native screen sharing could not start.')
+}
+
+async function stopNativeScreenShare(room: NativeRoom, markStopped: () => void) {
+  if (!room.localParticipant.setScreenShareEnabled) {
+    markStopped()
+    return
+  }
+
+  await room.localParticipant.setScreenShareEnabled(false)
+  markStopped()
 }
 
 function setRemoteSubscriptions(room: NativeRoom, subscribed: boolean) {

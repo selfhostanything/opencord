@@ -966,8 +966,8 @@ describe('mobile app state', () => {
         kind: 'screenShare',
         label: 'Screen sharing',
         status: 'promptable',
-        purpose: 'Used when you share a screen, window, or tab.',
-        canRequest: true,
+        purpose: 'Requested only when you start sharing from an active voice or meeting room.',
+        canRequest: false,
       },
       {
         kind: 'speaker',

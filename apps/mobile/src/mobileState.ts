@@ -603,7 +603,7 @@ const mediaPermissionRows: Array<Omit<MobileMediaPermissionRow, 'status' | 'canR
   {
     kind: 'screenShare',
     label: 'Screen sharing',
-    purpose: 'Used when you share a screen, window, or tab.',
+    purpose: 'Requested only when you start sharing from an active voice or meeting room.',
   },
   {
     kind: 'speaker',
@@ -1290,7 +1290,8 @@ export function mobileMediaPermissionRows(state: MobileAppState): MobileMediaPer
     return {
       ...row,
       status,
-      canRequest: status === 'promptable' || status === 'denied',
+      canRequest:
+        row.kind !== 'screenShare' && (status === 'promptable' || status === 'denied'),
     }
   })
 }

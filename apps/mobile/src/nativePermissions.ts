@@ -28,7 +28,7 @@ export async function queryNativeMediaPermissions(): Promise<Partial<MobileMedia
       microphone: 'promptable',
       nativeCallIntegration: await queryNativeCallIntegrationStatus({ platform: Platform.OS }),
       notifications: Platform.OS === 'ios' ? 'system-settings-required' : 'unsupported',
-      screenShare: Platform.OS === 'ios' ? 'system-settings-required' : 'unsupported',
+      screenShare: Platform.OS === 'ios' ? 'promptable' : 'unsupported',
       speaker: 'unsupported',
     }
   }
@@ -106,7 +106,7 @@ async function requestIosMediaPermission(
   kind: MobileMediaPermissionKind,
 ): Promise<MobileMediaPermissionStatus> {
   if (kind === 'screenShare') {
-    return 'system-settings-required'
+    return 'promptable'
   }
   if (kind === 'notifications') {
     return 'system-settings-required'

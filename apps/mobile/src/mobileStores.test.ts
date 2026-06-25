@@ -247,7 +247,7 @@ describe('mobile Zustand stores', () => {
     expect(JSON.stringify(useMobileDeveloperStore.getState())).not.toContain('"token"')
   })
 
-  it('tracks voice route, mute/deafen controls, and screen-share watcher state', () => {
+  it('tracks voice route, mute/deafen controls, and screen-share publisher/watcher state', () => {
     useMobileVoiceStore.getState().joinRoute({
       kind: 'channel',
       serverId: 'local-opencord',
@@ -256,6 +256,8 @@ describe('mobile Zustand stores', () => {
     })
     useMobileVoiceStore.getState().setMute(true)
     useMobileVoiceStore.getState().setDeafened(true)
+    useMobileVoiceStore.getState().requestScreenShare()
+    useMobileVoiceStore.getState().publishScreenShare()
     useMobileVoiceStore.getState().setScreenShareWatcher({
       status: 'watching',
       remoteScreenShares: 2,
@@ -270,10 +272,25 @@ describe('mobile Zustand stores', () => {
       },
       muted: true,
       deafened: true,
+      screenSharePublisher: {
+        status: 'publishing',
+      },
       screenShareWatcher: {
         status: 'watching',
         remoteScreenShares: 2,
       },
+    })
+    expect(JSON.stringify(useMobileVoiceStore.getState())).not.toContain('participantToken')
+
+    useMobileVoiceStore.getState().failScreenShare('OS capture permission was denied.')
+    expect(useMobileVoiceStore.getState().screenSharePublisher).toEqual({
+      status: 'failed',
+      message: 'OS capture permission was denied.',
+    })
+
+    useMobileVoiceStore.getState().stopScreenShare()
+    expect(useMobileVoiceStore.getState().screenSharePublisher).toEqual({
+      status: 'stopped',
     })
   })
 

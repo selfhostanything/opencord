@@ -17,7 +17,7 @@ export type MobileE2ELaunchConfig = {
   serverUrl: string
 }
 
-export type MobileE2ECommand = 'deaf' | 'leave' | 'mute'
+export type MobileE2ECommand = 'deaf' | 'leave' | 'mute' | 'screenShareStart' | 'screenShareStop'
 
 export function normalizeMobileE2ELaunchConfig(value: unknown): MobileE2ELaunchConfig | null {
   if (!value || typeof value !== 'object') {
@@ -107,6 +107,10 @@ export function mobileE2ECommandFromUrl(url: string): MobileE2ECommand | null {
       return 'deaf'
     case 'media/leave':
       return 'leave'
+    case 'media/screen-share/start':
+      return 'screenShareStart'
+    case 'media/screen-share/stop':
+      return 'screenShareStop'
     default:
       return null
   }
@@ -117,6 +121,8 @@ export function normalizeMobileE2ECommand(value: unknown): MobileE2ECommand | nu
     case 'mute':
     case 'deaf':
     case 'leave':
+    case 'screenShareStart':
+    case 'screenShareStop':
       return value
     default:
       return null
